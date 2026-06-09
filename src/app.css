@@ -1,0 +1,1733 @@
+/* ================================================================
+   Pulse — base CSS tokens & design language
+   Ported from docs/design/mockup-dashboard.html
+   ================================================================ */
+
+:root {
+  --bg: #0a0d13;
+  --card: rgba(255, 255, 255, 0.035);
+  --card-brd: rgba(255, 255, 255, 0.07);
+  --txt: #e7ecf3;
+  --sub: #8b95a7;
+  --accent: #28e0a0;
+  --accent2: #36c6ff;
+  --radius: 16px;
+}
+
+/* Reset */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+/* Body / root background */
+body {
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  background:
+    radial-gradient(1200px 600px at 80% -10%, color-mix(in srgb, var(--accent2) 12%, transparent), transparent 60%),
+    radial-gradient(900px 500px at 0% 110%, color-mix(in srgb, var(--accent) 12%, transparent), transparent 55%),
+    var(--bg);
+  color: var(--txt);
+  min-height: 100vh;
+  letter-spacing: 0.1px;
+  font-size: 14px;
+  line-height: 1.5;
+  /* Prevent accidental horizontal overflow from making the document wider than the visual
+     viewport — on iOS that slides right-anchored `position:fixed` elements (the agent FAB) off
+     screen. Horizontally-scrollable widgets keep their own internal overflow containers. */
+  overflow-x: hidden;
+}
+
+/* ----------------------------------------------------------------
+   Shell layout
+   ---------------------------------------------------------------- */
+.shell {
+  display: flex;
+  gap: 22px;
+  max-width: min(1680px, 95vw);
+  margin: 0 auto;
+  padding: 22px 32px;
+}
+
+/* ----------------------------------------------------------------
+   Mobile shell (≤768px): hide the left rail, drop the wide gutters,
+   and leave room at the bottom for the fixed BottomNav.
+   ---------------------------------------------------------------- */
+@media (max-width: 768px) {
+  .shell {
+    gap: 0;
+    max-width: 100%;
+    padding: 14px 16px;
+    padding-bottom: calc(72px + env(safe-area-inset-bottom));
+  }
+}
+
+/* ----------------------------------------------------------------
+   Rail (left nav)
+   ---------------------------------------------------------------- */
+.rail {
+  width: 56px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 22px;
+  padding-top: 6px;
+}
+
+.logo {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  box-shadow: 0 6px 22px color-mix(in srgb, var(--accent) 38%, transparent);
+}
+
+.logo svg {
+  width: 24px;
+  height: 24px;
+}
+
+.nav {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 8px;
+}
+
+.nav a {
+  width: 40px;
+  height: 40px;
+  border-radius: 11px;
+  display: grid;
+  place-items: center;
+  color: var(--sub);
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid transparent;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.nav a.active {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 11%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 24%, transparent);
+}
+
+.nav svg {
+  width: 20px;
+  height: 20px;
+}
+
+/* Hide the left rail on mobile (≤768px) — placed AFTER the base .rail rules so this
+   unconditional-vs-conditional source order resolves to display:none at narrow widths.
+   The BottomNav replaces it. */
+@media (max-width: 768px) {
+  .rail {
+    display: none;
+  }
+}
+
+/* ----------------------------------------------------------------
+   Main area
+   ---------------------------------------------------------------- */
+.main {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ----------------------------------------------------------------
+   Topbar
+   ---------------------------------------------------------------- */
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 22px;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.brand h1 {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.3px;
+}
+
+.ekg {
+  width: 60px;
+  height: 24px;
+}
+
+.ekg path {
+  stroke: var(--accent);
+  stroke-width: 2;
+  fill: none;
+  stroke-dasharray: 120;
+  stroke-dashoffset: 120;
+  animation: trace 2.4s linear infinite;
+}
+
+@keyframes trace {
+  to { stroke-dashoffset: -120; }
+}
+
+.chips {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.clock {
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+  color: var(--sub);
+}
+
+/* ----------------------------------------------------------------
+   Cards
+   ---------------------------------------------------------------- */
+.card {
+  background: var(--card);
+  border: 1px solid var(--card-brd);
+  border-radius: var(--radius);
+  padding: 18px;
+  backdrop-filter: blur(10px);
+  min-width: 0;
+}
+
+.card h3 {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 1.4px;
+  color: var(--sub);
+  margin-bottom: 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  width: fit-content;
+}
+
+.card h3 .arw {
+  opacity: 0;
+  transition: 0.15s;
+  color: var(--accent);
+}
+
+.card h3:hover .arw {
+  opacity: 1;
+}
+
+.card h3:hover {
+  color: var(--txt);
+}
+
+/* Card header row (title + badge + actions) */
+.ch {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+  gap: 10px;
+}
+
+.ch h3 {
+  margin-bottom: 0;
+}
+
+.cnt-badge {
+  font-size: 10.5px;
+  padding: 2px 7px;
+  border-radius: 99px;
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--sub);
+  font-weight: 700;
+}
+
+/* ----------------------------------------------------------------
+   Pills
+   ---------------------------------------------------------------- */
+.pill {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 3px 9px;
+  border-radius: 99px;
+  display: inline-block;
+}
+
+.pill.ok {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--accent);
+}
+
+.pill.proc {
+  background: color-mix(in srgb, var(--accent2) 16%, transparent);
+  color: var(--accent2);
+}
+
+/* ----------------------------------------------------------------
+   Progress bar
+   ---------------------------------------------------------------- */
+.prog {
+  height: 6px;
+  border-radius: 99px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+  margin-top: 4px;
+}
+
+.prog i {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), var(--accent2));
+}
+
+/* ----------------------------------------------------------------
+   Mini bar (topbar server stats)
+   ---------------------------------------------------------------- */
+.bar {
+  width: 46px;
+  height: 5px;
+  border-radius: 99px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.bar i {
+  display: block;
+  height: 100%;
+  border-radius: 99px;
+  background: linear-gradient(90deg, var(--accent), var(--accent2));
+}
+
+/* ----------------------------------------------------------------
+   Server stats button (topbar chip group)
+   ---------------------------------------------------------------- */
+.server-btn {
+  display: flex;
+  align-items: center;
+  background: var(--card);
+  border: 1px solid var(--card-brd);
+  border-radius: 12px;
+  cursor: pointer;
+  transition: 0.15s;
+  overflow: hidden;
+}
+
+.server-btn:hover {
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  background: color-mix(in srgb, var(--accent) 8%, var(--card));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.chip {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 13px;
+  font-size: 12px;
+  color: var(--sub);
+  border-right: 1px solid var(--card-brd);
+}
+
+.server-btn .chip:last-of-type {
+  border-right: none;
+}
+
+.chip b {
+  color: var(--txt);
+  font-size: 13px;
+}
+
+.server-btn .arr2 {
+  padding: 0 11px;
+  color: var(--accent);
+  opacity: 0;
+  width: 0;
+  transition: 0.18s;
+  font-size: 13px;
+  overflow: hidden;
+}
+
+.server-btn:hover .arr2 {
+  opacity: 1;
+  width: auto;
+  padding: 0 11px 0 4px;
+}
+
+/* ----------------------------------------------------------------
+   Dashboard grid
+   ---------------------------------------------------------------- */
+.grid {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 22px;
+}
+
+.col {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-width: 0;
+}
+
+/* ----------------------------------------------------------------
+   Carousel / track
+   ---------------------------------------------------------------- */
+.caro {
+  position: relative;
+  min-width: 0;
+}
+
+.track {
+  display: flex;
+  gap: 12px;
+  overflow-x: auto;
+  scroll-behavior: smooth;
+  scrollbar-width: none;
+  min-width: 0;
+}
+
+.track::-webkit-scrollbar {
+  display: none;
+}
+
+.arw-btn {
+  position: absolute;
+  top: 38%;
+  width: 30px;
+  height: 30px;
+  border-radius: 99px;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  background: rgba(12, 16, 24, 0.85);
+  border: 1px solid var(--card-brd);
+  color: var(--txt);
+  z-index: 3;
+}
+
+.arw-btn.l { left: -8px; }
+.arw-btn.r { right: -8px; }
+
+/* ----------------------------------------------------------------
+   Touch carousels (≤768px): use native horizontal scroll with scroll-snap
+   and momentum, and hide the ‹ › arrow buttons (swipe instead).
+   ---------------------------------------------------------------- */
+@media (max-width: 768px) {
+  .track {
+    scroll-snap-type: x mandatory;
+    -webkit-overflow-scrolling: touch;
+  }
+  .track .poster {
+    scroll-snap-align: start;
+  }
+  .arw-btn {
+    display: none;
+  }
+}
+
+/* ----------------------------------------------------------------
+   Poster cards
+   ---------------------------------------------------------------- */
+.poster {
+  flex: 0 0 104px;
+  width: 104px;
+  cursor: pointer;
+  transition: transform 0.18s;
+  position: relative;
+}
+
+.poster:hover {
+  transform: translateY(-4px);
+}
+
+.poster .art {
+  width: 104px;
+  height: 156px;
+  border-radius: 11px;
+  position: relative;
+  overflow: hidden;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.35);
+}
+
+.poster:hover .art {
+  box-shadow: 0 12px 28px color-mix(in srgb, var(--accent) 22%, rgba(0, 0, 0, 0.4));
+}
+
+.poster .badge {
+  position: absolute;
+  top: 7px;
+  left: 7px;
+  font-size: 9px;
+  font-weight: 700;
+  padding: 3px 7px;
+  border-radius: 6px;
+  background: rgba(10, 13, 19, 0.7);
+}
+
+.poster .play {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  opacity: 0;
+  background: rgba(8, 11, 16, 0.4);
+  transition: 0.18s;
+}
+
+.poster:hover .play {
+  opacity: 1;
+}
+
+.poster .play span {
+  width: 38px;
+  height: 38px;
+  border-radius: 99px;
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  display: grid;
+  place-items: center;
+  color: #08110d;
+}
+
+.poster .ttl {
+  font-size: 12px;
+  margin-top: 8px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.poster .yr {
+  font-size: 11px;
+  color: var(--sub);
+}
+
+/* ----------------------------------------------------------------
+   Art placeholder colour classes
+   ---------------------------------------------------------------- */
+.a1 { background: linear-gradient(160deg, #7b1f2b, #2a0f14); }
+.a2 { background: linear-gradient(160deg, #16263f, #0a1422); }
+.a3 { background: linear-gradient(160deg, #1d3b2a, #0c1a13); }
+.a4 { background: linear-gradient(160deg, #3a2c12, #1a1206); }
+.a5 { background: linear-gradient(160deg, #2d2640, #141021); }
+.a6 { background: linear-gradient(160deg, #123040, #08171f); }
+.a7 { background: linear-gradient(160deg, #402036, #1c0e18); }
+.a8 { background: linear-gradient(160deg, #2a3514, #121806); }
+
+/* ----------------------------------------------------------------
+   Streams (Now Playing list)
+   ---------------------------------------------------------------- */
+.streams {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.stream {
+  display: flex;
+  gap: 11px;
+  cursor: pointer;
+  padding: 3px;
+  border-radius: 9px;
+  transition: 0.15s;
+}
+
+.stream:hover {
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.sart {
+  flex: 0 0 40px;
+  height: 56px;
+  border-radius: 7px;
+}
+
+.sinfo {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+}
+
+.snm {
+  font-size: 13.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.swho {
+  font-size: 11.5px;
+  color: var(--sub);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ----------------------------------------------------------------
+   Dot / pulse indicator
+   ---------------------------------------------------------------- */
+.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 99px;
+  background: var(--accent);
+  animation: pulse-dot 1.8s infinite;
+}
+
+@keyframes pulse-dot {
+  0%   { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 50%, transparent); }
+  70%  { box-shadow: 0 0 0 7px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+
+/* ----------------------------------------------------------------
+   Mini sort select
+   ---------------------------------------------------------------- */
+.mini-sort {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--card-brd);
+  color: var(--sub);
+  border-radius: 8px;
+  padding: 4px 8px;
+  font-size: 11px;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+.mini-sort:hover { color: var(--txt); }
+
+/* ----------------------------------------------------------------
+   Native <select> theming — match the dark text inputs everywhere
+   (settings AI pickers, role/token-plan, provider/temperature, etc.).
+   Inputs across the app use rgba(255,255,255,0.03–0.05) + --card-brd;
+   we mirror that and swap the white OS chevron for a themed inline SVG.
+   ---------------------------------------------------------------- */
+select {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  background-color: rgba(255, 255, 255, 0.05);
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8' fill='none'><path d='M1 1.5L6 6.5L11 1.5' stroke='%238b95a7' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  border: 1px solid var(--card-brd);
+  border-radius: 10px;
+  color: var(--txt);
+  font: inherit;
+  font-size: 14px;
+  padding: 10px 34px 10px 14px;
+  outline: none;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+
+select:focus {
+  border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+}
+
+select option {
+  background: #11151d;
+  color: var(--txt);
+}
+
+/* ----------------------------------------------------------------
+   Drawer + scrim
+   ---------------------------------------------------------------- */
+.scrim {
+  position: fixed;
+  inset: 0;
+  background: rgba(5, 7, 11, 0.55);
+  opacity: 0;
+  pointer-events: none;
+  transition: 0.25s;
+  z-index: 60;
+}
+
+.scrim.open {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  height: 100%;
+  width: 380px;
+  background: #0c1018;
+  border-left: 1px solid var(--card-brd);
+  transform: translateX(100%);
+  transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+  z-index: 61;
+  padding: 24px;
+  overflow: auto;
+}
+
+.drawer.open {
+  transform: none;
+}
+
+/* ----------------------------------------------------------------
+   Mobile drawer (≤768px): a full-width bottom sheet that slides UP and
+   covers most of the screen, instead of the narrow right-side panel.
+   ---------------------------------------------------------------- */
+@media (max-width: 768px) {
+  .drawer {
+    top: auto;
+    bottom: 0;
+    right: 0;
+    left: 0;
+    width: 100%;
+    height: auto;
+    max-height: 90vh;
+    border-left: none;
+    border-top: 1px solid var(--card-brd);
+    border-radius: 20px 20px 0 0;
+    /* slide up from below */
+    transform: translateY(100%);
+    /* extra top padding leaves room for the drag handle + close button */
+    padding: 26px 20px calc(20px + env(safe-area-inset-bottom));
+    overscroll-behavior: contain;
+  }
+
+  .drawer.open {
+    transform: none;
+  }
+
+  /* Drag/close affordance: a centered grab pill at the top of the sheet. */
+  .drawer::before {
+    content: '';
+    position: absolute;
+    top: 9px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 40px;
+    height: 4px;
+    border-radius: 99px;
+    background: var(--card-brd);
+  }
+
+  /* Bigger, thumb-reachable close target on the sheet. */
+  .drawer .close {
+    top: 14px;
+    right: 14px;
+    width: 40px;
+    height: 40px;
+    display: grid;
+    place-items: center;
+  }
+
+  /* Action buttons get comfortable ≥44px tap targets on touch. */
+  .drawer .btn {
+    padding: 14px;
+    font-size: 14px;
+  }
+}
+
+.drawer .dart {
+  height: 210px;
+  border-radius: 14px;
+  margin-bottom: 18px;
+}
+
+.drawer h2 {
+  font-size: 21px;
+  font-weight: 700;
+}
+
+.drawer .meta {
+  color: var(--sub);
+  font-size: 13px;
+  margin: 6px 0 14px;
+}
+
+.drawer p {
+  font-size: 13.5px;
+  color: #b9c2d0;
+  line-height: 1.55;
+  margin-bottom: 18px;
+}
+
+.close {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  color: var(--sub);
+  cursor: pointer;
+  font-size: 20px;
+}
+
+/* ----------------------------------------------------------------
+   Action buttons (inside drawer)
+   ---------------------------------------------------------------- */
+.acts {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.btn {
+  padding: 11px;
+  border-radius: 10px;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* Disabled buttons must READ as disabled everywhere (e.g. "Generate invite link" before a role
+   is picked) — the base .btn had no disabled state, so a disabled primary button still looked
+   fully clickable. */
+.btn:disabled,
+.btn[disabled] {
+  opacity: 0.45;
+  cursor: not-allowed;
+  box-shadow: none;
+  filter: saturate(0.7);
+}
+
+.btn-p {
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  color: #08110d;
+}
+
+.btn-s {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--txt);
+  border: 1px solid var(--card-brd);
+}
+
+.btn-d {
+  background: rgba(255, 92, 122, 0.10);
+  color: #ff7a92;
+  border: 1px solid rgba(255, 92, 122, 0.25);
+}
+
+/* ----------------------------------------------------------------
+   Auth pages (.auth centred layout)
+   ---------------------------------------------------------------- */
+.auth {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  padding: 24px;
+}
+
+.auth h1 {
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+}
+
+.auth form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  max-width: 340px;
+  background: var(--card);
+  border: 1px solid var(--card-brd);
+  border-radius: var(--radius);
+  padding: 24px;
+}
+
+.auth input {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--card-brd);
+  border-radius: 10px;
+  color: var(--txt);
+  font-size: 14px;
+  padding: 10px 14px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.auth input:focus {
+  border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+}
+
+.auth button {
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  color: #08110d;
+  border: none;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 700;
+  padding: 11px;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.auth button:hover { opacity: 0.88; }
+
+.err {
+  color: #ff7a92;
+  font-size: 13px;
+}
+
+/* ----------------------------------------------------------------
+   Containers mini grid
+   ---------------------------------------------------------------- */
+.conts {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+}
+
+.cnt {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 9px;
+  padding: 8px 11px;
+  cursor: pointer;
+  transition: 0.15s;
+}
+
+.cnt:hover {
+  background: color-mix(in srgb, var(--accent) 9%, rgba(255, 255, 255, 0.02));
+}
+
+.gd {
+  width: 7px;
+  height: 7px;
+  border-radius: 99px;
+  background: var(--accent);
+}
+
+.small {
+  font-size: 11px;
+  color: var(--sub);
+  margin-top: 2px;
+}
+
+/* ---- list page (drilldown) ---- */
+.lp-head { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+.lp-head .back {
+  width: 32px; height: 32px; border-radius: 9px; display: grid; place-items: center;
+  border: 1px solid var(--card-brd); color: var(--sub); cursor: pointer; text-decoration: none; font-size: 18px;
+}
+.lp-head .back:hover { color: var(--txt); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+.lp-head h2 { font-size: 18px; }
+.cnt-pill { font-size: 12px; color: var(--sub); padding: 3px 9px; border: 1px solid var(--card-brd); border-radius: 999px; }
+.toolbar { margin-left: auto; display: flex; gap: 10px; align-items: center; }
+.seg { display: inline-flex; border: 1px solid var(--card-brd); border-radius: 8px; overflow: hidden; }
+.seg span { padding: 5px 10px; cursor: pointer; color: var(--sub); }
+.seg span.sel { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); }
+.sortsel {
+  background: var(--card); border: 1px solid var(--card-brd); color: var(--txt);
+  border-radius: 8px; padding: 5px 9px; font-size: 13px;
+}
+.lp-grid { display: grid; grid-template-columns: repeat(auto-fill, 104px); gap: 16px; }
+.lp-row {
+  display: flex; align-items: center; gap: 14px; padding: 11px 14px; cursor: pointer;
+  border: 1px solid var(--card-brd); border-radius: 12px; background: var(--card); margin-bottom: 8px;
+}
+.lp-row:hover { border-color: color-mix(in srgb, var(--accent) 35%, transparent); }
+.lp-row .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lp-row .col { color: var(--sub); font-size: 13px; }
+.lp-row .iacts { display: flex; gap: 6px; }
+.iact {
+  width: 28px; height: 28px; display: grid; place-items: center; border-radius: 7px;
+  border: 1px solid var(--card-brd); color: var(--sub); cursor: pointer; background: none; font-size: 13px;
+}
+.iact:hover { color: var(--txt); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+.lp-empty, .lp-err { color: var(--sub); font-size: 14px; padding: 24px 0; }
+.lp-err { color: #ff7a92; }
+.ch-link { color: inherit; text-decoration: none; }
+.ch-link:hover { color: var(--accent); }
+.poster-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: inherit;
+}
+
+/* ---- server sub-dashboard ---- */
+.sv-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; margin-bottom: 18px; }
+.sv-panel { background: var(--card); border: 1px solid var(--card-brd); border-radius: var(--radius); padding: 14px; }
+.sv-top { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 8px; }
+.sv-ttl { color: var(--sub); font-size: 13px; }
+.sv-top b { color: var(--txt); font-size: 15px; }
+.chart { width: 100%; height: 54px; display: block; }
+.sv-na { color: var(--sub); font-size: 12px; padding: 18px 0; text-align: center; }
+.sv-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 18px; }
+.sstat { background: var(--card); border: 1px solid var(--card-brd); border-radius: 12px; padding: 14px; text-align: center; }
+.sstat .v { font-size: 17px; color: var(--txt); }
+.sstat .l { font-size: 12px; color: var(--sub); margin-top: 3px; }
+.topc { background: var(--card); border: 1px solid var(--card-brd); border-radius: var(--radius); padding: 16px; }
+.topc h4 { font-size: 14px; margin-bottom: 12px; }
+.tcr { display: flex; align-items: center; gap: 12px; margin-bottom: 9px; }
+.tcr .nm { width: 120px; font-size: 13px; color: var(--txt); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tcr .pbar { flex: 1; height: 6px; background: rgba(255,255,255,0.06); border-radius: 999px; overflow: hidden; }
+.tcr .pbar i { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), var(--accent2)); }
+.tcr .pc2 { width: 48px; text-align: right; font-size: 12px; color: var(--sub); }
+
+/* ----------------------------------------------------------------
+   Server sub-dashboard on mobile (≤768px): stack the SVG graph panels
+   vertically, full-width; keep the summary stat tiles in a tidy 2-up grid.
+   ---------------------------------------------------------------- */
+@media (max-width: 768px) {
+  .sv-grid { grid-template-columns: 1fr; }
+  .sv-stats { grid-template-columns: repeat(2, 1fr); }
+  .lp-head .back {
+    width: 44px;
+    height: 44px;
+  }
+  .src-btn { min-height: 36px; }
+
+  /* Drilldown list grid: fit phone width without horizontal overflow. */
+  .lp-grid { grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); }
+  .iact { width: 40px; height: 40px; }
+}
+
+/* ----------------------------------------------------------------
+   Global mobile ergonomics (≤768px): never allow horizontal overflow.
+   ---------------------------------------------------------------- */
+@media (max-width: 768px) {
+  html, body {
+    overflow-x: hidden;
+  }
+}
+
+/* ----------------------------------------------------------------
+   Compact density — tighter paddings, reduced row heights and gaps.
+   Applied via data-density="compact" on <html>.
+   ---------------------------------------------------------------- */
+[data-density="compact"] .shell {
+  gap: 14px;
+  padding: 14px 24px;
+}
+
+[data-density="compact"] .card {
+  padding: 12px;
+}
+
+[data-density="compact"] .card h3 {
+  margin-bottom: 10px;
+}
+
+[data-density="compact"] .col {
+  gap: 12px;
+}
+
+[data-density="compact"] .grid {
+  gap: 14px;
+}
+
+[data-density="compact"] .chip {
+  padding: 6px 10px;
+}
+
+[data-density="compact"] .stream {
+  gap: 8px;
+}
+
+[data-density="compact"] .streams {
+  gap: 8px;
+}
+
+[data-density="compact"] .topbar {
+  margin-bottom: 14px;
+}
+
+[data-density="compact"] .conn-card {
+  padding: 10px 12px;
+}
+
+[data-density="compact"] .md-detail {
+  padding: 14px 16px;
+  gap: 12px;
+}
+
+[data-density="compact"] .md-rail-item {
+  padding: 6px 10px;
+}
+
+@media (max-width: 768px) {
+  [data-density="compact"] .shell {
+    padding: 10px 12px;
+    padding-bottom: calc(72px + env(safe-area-inset-bottom));
+  }
+}
+
+/* ----------------------------------------------------------------
+   Agent assistant — rail entry, floating launcher, chat panel, cards
+   ---------------------------------------------------------------- */
+
+/* Rail "Assistant" button — match the .nav a look exactly. */
+.rail-agent {
+  width: 40px;
+  height: 40px;
+  border-radius: 11px;
+  display: grid;
+  place-items: center;
+  color: var(--sub);
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid transparent;
+  cursor: pointer;
+}
+.rail-agent svg { width: 20px; height: 20px; }
+.rail-agent:hover { color: var(--txt); }
+.rail-agent.active {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 11%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 24%, transparent);
+}
+
+/* Floating launcher (FAB), bottom-right. */
+.agent-fab {
+  position: fixed;
+  right: max(22px, env(safe-area-inset-right));
+  bottom: 22px;
+  z-index: 80;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  border: none;
+  cursor: pointer;
+  font-size: 22px;
+  color: #08110d;
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  box-shadow: 0 8px 26px color-mix(in srgb, var(--accent) 42%, transparent);
+  display: grid;
+  place-items: center;
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+.agent-fab:hover { transform: translateY(-2px); }
+
+/* Slide-in chat panel (desktop: right drawer). */
+/* Opaque full-screen layer behind the mobile chat sheet. Covers the whole layout viewport so the
+   strip iOS reserves for its keyboard accessory/URL bar shows solid colour, never the page. */
+.agent-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 89;
+  background: var(--bg);
+}
+
+.agent-panel {
+  position: fixed;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  z-index: 90;
+  /* Wider drawer so markdown tables fit without a cramped horizontal scrollbar. */
+  width: clamp(420px, 40vw, 600px);
+  max-width: 100vw;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  background: color-mix(in srgb, var(--bg) 94%, #000);
+  border-left: 1px solid var(--card-brd);
+  backdrop-filter: blur(14px);
+  box-shadow: -12px 0 40px rgba(0, 0, 0, 0.4);
+}
+
+/* Mobile: full-screen sheet. */
+.agent-panel.sheet {
+  width: 100vw;
+  border-left: none;
+}
+/* Belt-and-suspenders: full width on small viewports even without the sheet class. */
+@media (max-width: 640px) {
+  .agent-panel {
+    width: 100vw;
+    border-left: none;
+  }
+}
+
+.agent-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--card-brd);
+  flex-shrink: 0;
+}
+.agent-head-title { font-size: 15px; font-weight: 700; }
+.agent-head-actions { display: flex; align-items: center; gap: 8px; }
+.agent-usage { font-size: 11px; color: var(--sub); }
+.agent-icon {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  border: 1px solid var(--card-brd);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--sub);
+  cursor: pointer;
+  font-size: 15px;
+  display: grid;
+  place-items: center;
+}
+.agent-icon:hover { color: var(--txt); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
+
+.agent-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.agent-empty { color: var(--sub); font-size: 13px; text-align: center; margin-top: 24px; }
+
+.agent-msg {
+  max-width: 88%;
+  padding: 9px 13px;
+  border-radius: 13px;
+  font-size: 13.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  /* Gentle fade/slide as each new message lands. */
+  animation: agent-msg-in 0.22s ease both;
+}
+@keyframes agent-msg-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .agent-msg { animation: none; }
+}
+.agent-msg.user {
+  align-self: flex-end;
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  color: #08110d;
+  border-bottom-right-radius: 4px;
+}
+.agent-msg.assistant {
+  align-self: flex-start;
+  /* Let assistant replies (markdown, tables) use most of the panel width. */
+  max-width: 96%;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--card-brd);
+  color: var(--txt);
+  border-bottom-left-radius: 4px;
+  /* Assistant text is rendered as Markdown HTML, not raw text — let block elements
+     control their own whitespace so source newlines don't add blank lines. */
+  white-space: normal;
+}
+
+/* Tool/result/confirm cards. */
+.agent-card {
+  align-self: flex-start;
+  max-width: 100%;
+  border-radius: 11px;
+  border: 1px solid var(--card-brd);
+  background: rgba(255, 255, 255, 0.025);
+  font-size: 12.5px;
+  padding: 9px 12px;
+}
+.agent-card.tool {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  color: var(--sub);
+}
+.agent-card-icon { font-size: 13px; }
+.agent-card-args {
+  font-family: ui-monospace, 'Cascadia Code', monospace;
+  font-size: 11px;
+  color: var(--sub);
+  opacity: 0.8;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+.agent-card.result { padding: 0; overflow: hidden; }
+.agent-result-head {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--txt);
+  font-size: 12.5px;
+  text-align: left;
+}
+.agent-card-tool { font-weight: 600; }
+.agent-result-brief { flex: 1; min-width: 0; color: var(--sub); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-result-chev { color: var(--sub); font-size: 11px; }
+.agent-result-pre {
+  margin: 0;
+  padding: 10px 12px;
+  border-top: 1px solid var(--card-brd);
+  font-family: ui-monospace, 'Cascadia Code', monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--sub);
+  max-height: 260px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.agent-card.confirm {
+  align-self: stretch;
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 30%, transparent);
+}
+.agent-confirm-prompt { font-weight: 700; font-size: 13px; margin-bottom: 4px; }
+.agent-confirm-detail { color: var(--txt); font-size: 13px; margin-bottom: 10px; }
+.agent-confirm-acts { display: flex; gap: 8px; }
+.agent-confirm-acts .btn { flex: 1; }
+.agent-confirm-resolved { font-size: 12px; font-weight: 600; }
+.agent-confirm-resolved.approved { color: var(--accent); }
+.agent-confirm-resolved.denied { color: #ff7a92; }
+
+.agent-typing { display: flex; gap: 4px; padding: 4px 2px; }
+.agent-typing span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--sub);
+  animation: agent-bounce 1.2s infinite ease-in-out;
+}
+.agent-typing span:nth-child(2) { animation-delay: 0.15s; }
+.agent-typing span:nth-child(3) { animation-delay: 0.3s; }
+@keyframes agent-bounce {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.5; }
+  30% { transform: translateY(-4px); opacity: 1; }
+}
+
+.agent-error {
+  font-size: 12.5px;
+  color: #ff7a92;
+  background: rgba(255, 92, 122, 0.1);
+  border: 1px solid rgba(255, 92, 122, 0.25);
+  border-radius: 9px;
+  padding: 9px 12px;
+}
+
+.agent-input {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 12px 14px;
+  border-top: 1px solid var(--card-brd);
+  flex-shrink: 0;
+  padding-bottom: calc(12px + env(safe-area-inset-bottom));
+}
+.agent-input textarea {
+  flex: 1;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--card-brd);
+  border-radius: 10px;
+  color: var(--txt);
+  font: inherit;
+  /* MUST be >= 16px: iOS Safari auto-zooms the whole page when focusing an input under 16px,
+     which reads as the page "resizing" when the keyboard opens. */
+  font-size: 16px;
+  line-height: 1.45;
+  padding: 10px 14px;
+  outline: none;
+  resize: none;
+  overflow-y: hidden;
+  max-height: 9.5rem;
+}
+.agent-input textarea:focus { border-color: color-mix(in srgb, var(--accent) 50%, transparent); }
+.agent-send { padding: 10px 16px; flex-shrink: 0; }
+.agent-send:disabled { opacity: 0.5; cursor: default; }
+
+/* On mobile, sit the FAB above the bottom nav. */
+@media (max-width: 768px) {
+  .agent-fab {
+    bottom: calc(72px + env(safe-area-inset-bottom));
+    right: max(16px, env(safe-area-inset-right));
+  }
+}
+
+/* ----------------------------------------------------------------
+   Notification bell + feed dropdown
+   ---------------------------------------------------------------- */
+.bell-wrap { position: relative; display: flex; align-items: center; }
+.bell-btn {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  background: none;
+  border: 1px solid var(--card-brd);
+  border-radius: 8px;
+  color: var(--sub);
+  cursor: pointer;
+  font-size: 16px;
+  transition: color 0.15s, border-color 0.15s;
+}
+.bell-btn:hover { color: var(--txt); border-color: color-mix(in srgb, var(--accent) 50%, transparent); }
+.bell-badge {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 99px;
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  color: #08110d;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+}
+.bell-feed {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 95;
+  width: 340px;
+  max-width: 92vw;
+  max-height: 70vh;
+  overflow-y: auto;
+  background: color-mix(in srgb, var(--bg) 94%, #000);
+  border: 1px solid var(--card-brd);
+  border-radius: 12px;
+  box-shadow: 0 16px 44px rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(14px);
+}
+.bell-feed-head {
+  padding: 12px 14px;
+  font-size: 13px;
+  font-weight: 700;
+  border-bottom: 1px solid var(--card-brd);
+  position: sticky;
+  top: 0;
+  background: inherit;
+}
+.bell-empty { padding: 20px 14px; color: var(--sub); font-size: 13px; text-align: center; }
+.bell-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--card-brd);
+  border-left: 3px solid transparent;
+}
+.bell-row:last-child { border-bottom: none; }
+.bell-row.read { opacity: 0.55; }
+.bell-row.sev-info { border-left-color: var(--sub); }
+.bell-row.sev-warn { border-left-color: #f2b347; }
+.bell-row.sev-crit { border-left-color: #ff7a92; }
+.bell-row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.bell-row-main b { font-size: 13px; font-weight: 600; }
+.bell-row-body { font-size: 12px; color: var(--sub); }
+.bell-row-foot { display: flex; gap: 8px; font-size: 11px; color: var(--sub); }
+.bell-row-src { font-weight: 600; }
+.bell-row-acts { display: flex; flex-direction: column; gap: 5px; flex-shrink: 0; }
+.bell-row-acts .btn { padding: 5px 9px; font-size: 11px; white-space: nowrap; }
+
+/* ══════════════════ Settings → Users & Roles tab ══════════════════ */
+.users-pane { display: flex; flex-direction: column; gap: 14px; }
+.users-pane h3 { margin: 6px 0 2px; }
+
+.role-list { display: flex; flex-direction: column; gap: 6px; }
+.role-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--card-brd);
+  border-radius: 10px;
+  background: var(--card);
+  flex-wrap: wrap;
+}
+.role-meta { font-size: 12px; color: var(--sub); }
+.role-row .acts { margin-left: auto; }
+
+.role-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+}
+.role-editor label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.role-editor input[type='text'],
+.role-editor input:not([type]),
+.role-editor input[type='number'] {
+  padding: 7px 9px;
+  border: 1px solid var(--card-brd);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--txt);
+}
+.caps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  border: 1px solid var(--card-brd);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+.caps legend { font-size: 12px; color: var(--sub); padding: 0 4px; }
+.cap { display: flex; flex-direction: row !important; align-items: center; gap: 6px; font-size: 13px; }
+
+.acts { display: flex; gap: 8px; align-items: center; }
+
+.invite-gen select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding: 7px 30px 7px 9px;
+  border: 1px solid var(--card-brd);
+  border-radius: 8px;
+  background-color: rgba(255, 255, 255, 0.03);
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8' fill='none'><path d='M1 1.5L6 6.5L11 1.5' stroke='%238b95a7' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  color: var(--txt);
+  cursor: pointer;
+}
+.invite-link { margin: 0; }
+.invite-link code {
+  display: inline-block;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  color: var(--accent);
+  word-break: break-all;
+}
+.invite-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.invite-list li { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+
+.pill-pending { background: color-mix(in srgb, #e0a028 16%, transparent); color: #e0a028; }
+.pill-accepted { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
+.pill-expired { background: rgba(255, 255, 255, 0.08); color: var(--sub); }
+
+.user-list { display: flex; flex-direction: column; gap: 8px; }
+.user-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--card-brd);
+  border-radius: 10px;
+  background: var(--card);
+  flex-wrap: wrap;
+}
+.user-row.disabled { opacity: 0.5; }
+.user-row select,
+.user-row .cap-override {
+  padding: 6px 8px;
+  border: 1px solid var(--card-brd);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--txt);
+}
+.user-row .cap-override { width: 110px; }
+.usage-bar {
+  flex: 1;
+  min-width: 80px;
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+.usage-fill { height: 100%; background: var(--accent); border-radius: 999px; transition: width 0.2s; }
+.usage-text { font-size: 12px; color: var(--sub); white-space: nowrap; }
+.user-row .acts { margin-left: auto; }
+
+@media (max-width: 768px) {
+  .user-row,
+  .role-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .user-row .acts,
+  .role-row .acts { margin-left: 0; }
+  .user-row select,
+  .user-row .cap-override { width: 100%; }
+}
+
+/* ----------------------------------------------------------------
+   Consumer app surface (/app — onboarding, login, My Account)
+   Deliberately simpler than the admin cockpit: a single centred card,
+   mobile-first, reusing the theme tokens.
+   ---------------------------------------------------------------- */
+.app-shell {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 16px;
+}
+
+.app-card {
+  width: 100%;
+  max-width: 420px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  background: var(--card);
+  border: 1px solid var(--card-brd);
+  border-radius: var(--radius);
+  padding: 24px;
+}
+
+.app-card h1 {
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -0.4px;
+}
+
+.app-card h2 {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--sub);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  margin-bottom: 8px;
+}
+
+.app-sub {
+  color: var(--sub);
+  font-size: 14px;
+  margin-top: -8px;
+}
+
+.app-card form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.app-card label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--sub);
+}
+
+.app-card input,
+.app-card select {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--card-brd);
+  border-radius: 10px;
+  color: var(--txt);
+  font-size: 14px;
+  padding: 10px 14px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+/* Keep the themed chevron + room for it on selects whose container rule sets a
+   background shorthand (which would otherwise wipe the global select chevron). */
+.app-card select {
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8' fill='none'><path d='M1 1.5L6 6.5L11 1.5' stroke='%238b95a7' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  padding-right: 34px;
+  cursor: pointer;
+}
+
+.app-card input:focus,
+.app-card select:focus {
+  border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+}
+
+.app-card .btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.app-error {
+  color: #ff7a92;
+  font-size: 13px;
+}
+
+.app-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.app-head .btn { width: auto; padding: 8px 14px; }
+
+.app-usage p {
+  font-size: 13px;
+  color: var(--sub);
+  margin-top: 8px;
+}
+
+.app-role p { font-size: 15px; }
+
+.app-role ul {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.app-role li {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 11%, transparent);
+  color: var(--accent);
+}
+
+.app-links {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.badge-ok {
+  align-self: flex-start;
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #0a6b2e;
+  background: #d7f5e1;
+  border: 1px solid #9fe3b8;
+}
+
+/* ----------------------------------------------------------------
+   Cinematic login + onboarding — frosted-glass card shared by the
+   /app/login card and the onboarding story/account form.
+   ---------------------------------------------------------------- */
+.glass-card {
+  background: color-mix(in srgb, var(--bg) 62%, rgba(255, 255, 255, 0.06));
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 20px;
+  backdrop-filter: blur(22px) saturate(1.2);
+  -webkit-backdrop-filter: blur(22px) saturate(1.2);
+  box-shadow:
+    0 24px 70px rgba(0, 0, 0, 0.55),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}

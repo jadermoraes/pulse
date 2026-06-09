@@ -1,0 +1,30 @@
+services:
+  pulse:
+    build: .
+    container_name: pulse
+    restart: unless-stopped
+    ports:
+      - "3002:3000"
+    environment:
+      - TZ=America/Sao_Paulo
+      # PULSE_SECRET_KEY=<64-hex>  # Optional: 64-char hex key (32 bytes) for AES-256-GCM
+      #   secret encryption. If unset, a key is auto-generated and persisted in the
+      #   data volume at /data/secret.key and reused across restarts.
+      # Mount the host's /proc and /sys read-only so the server sub-dashboard
+      # reports HOST metrics (CPU, memory, load, network, disk I/O, temperature)
+      # rather than the container's own namespaced view.
+      - PULSE_PROC_ROOT=/host/proc
+      - PULSE_SYS_ROOT=/host/sys
+    volumes:
+      - pulse_data:/data
+      # Docker socket is mounted READ-WRITE so restart/stop actions work.
+      # Tradeoff: root-equivalent control of all host containers (same as Portainer).
+      # Operators wanting status-only can re-add ":ro" — write actions then return a permission error,
+      # which Pulse surfaces gracefully in the drawer.
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Host proc/sys mounted read-only so metrics.ts can report host-level stats.
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+
+volumes:
+  pulse_data:
