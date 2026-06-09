@@ -2,6 +2,7 @@ import type { Connection } from '../connections';
 import type { Integration, WidgetResult, MediaDetail, DetailAction, DetailStatus } from './types';
 import { registerIntegration } from './registry';
 import { joinUrl, getJsonWithKey, sendJsonWithKey } from '../http';
+import { publicBase } from '../public-url';
 
 // request.status (MediaRequestStatus): 1=Pending, 2=Approved, 3=Declined, 4=Failed, 5=Completed
 // media.status (MediaStatus):          1=Unknown, 2=Pending, 3=Processing, 4=Partially Available, 5=Available
@@ -186,7 +187,8 @@ export const seerr: Integration = {
       async run(conn, params) {
         const mediaType = params.mediaType === 'tv' ? 'tv' : 'movie';
         const tmdbId = encodeURIComponent(String(params.tmdbId));
-        return { ok: true, url: `${conn.baseUrl.replace(/\/$/, '')}/${mediaType}/${tmdbId}` };
+        const base = publicBase('seerr', conn.baseUrl);
+        return { ok: true, url: `${base.replace(/\/$/, '')}/${mediaType}/${tmdbId}` };
       } }
   },
   async detail(conn, params): Promise<MediaDetail> {

@@ -2,6 +2,7 @@ import type { Connection } from '../connections';
 import type { Integration, WidgetResult, MediaDetail, ImageRequest } from './types';
 import { registerIntegration } from './registry';
 import { joinUrl } from '../http';
+import { publicBase } from '../public-url';
 
 function api(conn: Connection, path: string, query: Record<string, string> = {}) {
   const u = new URL(conn.baseUrl.replace(/\/$/, '') + path);
@@ -55,7 +56,8 @@ export const jellyfin: Integration = {
   actions: {
     playInJellyfin: { id: 'playInJellyfin', label: '▶  Play in Jellyfin', kind: 'movie',
       async run(conn, params) {
-        return { ok: true, url: `${conn.baseUrl.replace(/\/$/, '')}/web/#/details?id=${params.id}` };
+        const base = publicBase('jellyfin', conn.baseUrl);
+        return { ok: true, url: `${base.replace(/\/$/, '')}/web/#/details?id=${params.id}` };
       } }
   },
   imageRequest(conn: Connection, path: string): ImageRequest {

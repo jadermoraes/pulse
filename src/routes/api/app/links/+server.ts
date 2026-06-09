@@ -2,6 +2,7 @@ import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { getDb } from '$lib/server/db';
 import { listConnections } from '$lib/server/connections';
+import { publicBase } from '$lib/server/public-url';
 
 /**
  * Consumer-gated quick links to the underlying apps a viewer might want to jump to.
@@ -15,7 +16,9 @@ export const GET: RequestHandler = async ({ locals }) => {
   const media = conns.find((c) => c.type === 'jellyfin') ?? conns.find((c) => c.type === 'plex');
   const seerr = conns.find((c) => c.type === 'seerr');
   return json({
-    jellyfin: media?.baseUrl ?? null,
-    seerr: seerr?.baseUrl ?? null
+    // Prefer a deploy-pinned public URL for viewer links (e.g. behind a tunnel);
+    // falls back to the internal baseUrl when unset. See $lib/server/public-url.
+    jellyfin: media ? publicBase(media.type, media.baseUrl) : null,
+    seerr: seerr ? publicBase('seerr', seerr.baseUrl) : null
   });
 };
