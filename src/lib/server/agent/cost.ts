@@ -19,14 +19,24 @@ export function priceFor(model: string): Price {
   return { inPerM: 0, outPerM: 0 };
 }
 
-export function estimateCost(model: string, input: number, output: number): number {
+/**
+ * `input` is the TOTAL input tokens (the AI SDK's flat `inputTokens` includes cache reads);
+ * `cached` is the cache-read portion of it, billed at 10% of the input rate (Anthropic's
+ * cache-read price). Cache WRITES are billed here at 1× instead of their true 1.25× — the SDK's
+ * flat usage shape doesn't expose them, and the per-turn write delta is small.
+ */
+export function estimateCost(model: string, input: number, output: number, cached = 0): number {
   const p = priceFor(model);
-  return (input / 1_000_000) * p.inPerM + (output / 1_000_000) * p.outPerM;
+  const cachedIn = Math.min(Math.max(cached, 0), input);
+  const freshIn = input - cachedIn;
+  return (freshIn / 1_000_000) * p.inPerM
+    + (cachedIn / 1_000_000) * p.inPerM * 0.1
+    + (output / 1_000_000) * p.outPerM;
 }
 
 /** Append a usage row, return the row's estimated cost (USD). Also bumps the legacy ai_usage lump. */
-export function recordUsage(db: DB, u: { model: string; input: number; output: number }): number {
-  const cost = estimateCost(u.model, u.input, u.output);
+export function recordUsage(db: DB, u: { model: string; input: number; output: number; cached?: number }): number {
+  const cost = estimateCost(u.model, u.input, u.output, u.cached ?? 0);
   db.prepare('INSERT INTO ai_usage_log(ts, model, input_tokens, output_tokens, cost_usd) VALUES (?,?,?,?,?)')
     .run(Date.now(), u.model || 'unknown', u.input, u.output, cost);
   try {

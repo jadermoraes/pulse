@@ -11,22 +11,20 @@ import { registerPending, resolvePending } from './confirm';
 import { recordAction } from './audit';
 import { recordEvent } from './events';
 import { notifyAdmins } from '../notify';
+import { CACHE_OPTS, withHistoryCacheMarker } from './cache';
+import { truncateToolResult } from './truncate';
+import { usageFromResult } from './usage';
 import type { AgentContext, ToolSpec } from './types';
 import type { Channel } from './channel';
 
 const MAX_STEPS = 8;
 
 /**
- * Anthropic ephemeral prompt-cache marker. Carried on the SYSTEM message so the large, stable
- * prefix (system prompt + tool schemas, which precede the system block in Anthropic's canonical
- * order) is cached and billed at ~10% on repeat calls. Without this, EVERY turn — and every step
- * of a multi-step turn, and every retry — re-bills the full system prompt + ~20 tool definitions
- * at full price (the cause of the 95:1 input:output ratio + the runaway cost). Mirrors the
- * consumer agent's CACHE_OPTS. Provider-agnostic: non-Anthropic providers ignore the namespace.
+ * The system prompt as a cache-marked system message so the stable prefix (system prompt + tool
+ * schemas) is cached. The conversation HISTORY gets its own breakpoint via withHistoryCacheMarker
+ * at send time — without it, the history (which can be 100k+ tokens) is re-billed at full input
+ * price on every call: every turn, every step of a multi-step turn, every retry.
  */
-const CACHE_OPTS = { anthropic: { cacheControl: { type: 'ephemeral' } } } as const;
-
-/** The system prompt as a cache-marked system message so the stable prefix is actually cached. */
 function systemMessage(): SystemModelMessage {
   return { role: 'system', content: systemPrompt(), providerOptions: CACHE_OPTS };
 }
@@ -201,7 +199,7 @@ async function driveLoop(ctx: AgentContext, channel: Channel, signal?: AbortSign
   const aiTools = toAiTools(ctx, specs);
   const messages = loadHistory(ctx.db, ctx.conversationId);
 
-  let usage = { input: 0, output: 0 };
+  let usage = { input: 0, output: 0, cached: 0 };
   // Per-turn cost (USD), accumulated across each recordUsage call this drive. Task 3 reads this.
   let turnCost = 0;
   // Per-turn step count (tool-call parts), read by checkGuards for the per-turn-steps guardrail.
@@ -232,7 +230,9 @@ async function driveLoop(ctx: AgentContext, channel: Channel, signal?: AbortSign
     const result = streamText({
       model,
       system: systemMessage(),
-      messages,
+      // History cache breakpoint (send-time only, never persisted): follow-up turns re-read
+      // the whole conversation at ~10% of the input rate instead of full price.
+      messages: withHistoryCacheMarker(messages),
       tools: aiTools,
       stopWhen: stepCountIs(MAX_STEPS),
       abortSignal: signal
@@ -273,7 +273,8 @@ async function driveLoop(ctx: AgentContext, channel: Channel, signal?: AbortSign
             });
             const out = await executeWriteInline(ctx, spec, name, args);
             channel.send({ type: 'tool_result', tool: name, result: out });
-            turnCost += recordUsage(ctx.db, { model: loadAiRefs(ctx.db).adminModel ?? 'unknown', input: usage.input, output: usage.output });
+            // Metered in the autoResume block below, AFTER the stream drains — the 'finish' part
+            // that populates `usage` hasn't arrived yet when we break here.
             // Resume the model so it can narrate the result with the tool-result in history.
             autoResume = true;
             break;
@@ -285,7 +286,9 @@ async function driveLoop(ctx: AgentContext, channel: Channel, signal?: AbortSign
           break;
         case 'finish': {
           const u = (part as any).totalUsage ?? {};
-          usage = { input: u.inputTokens ?? 0, output: u.outputTokens ?? 0 };
+          // inputTokens is the TOTAL (includes cache reads); cachedInputTokens is the cache-read
+          // portion, billed at 10% by recordUsage.
+          usage = { input: u.inputTokens ?? 0, output: u.outputTokens ?? 0, cached: u.cachedInputTokens ?? 0 };
           break;
         }
         case 'error': {
@@ -300,19 +303,24 @@ async function driveLoop(ctx: AgentContext, channel: Channel, signal?: AbortSign
     }
 
     if (autoResume) {
+      // We broke out of the loop before 'finish' — read the REAL totals from the drained stream,
+      // otherwise this invocation's tokens are never billed against the spend guardrails.
+      usage = await usageFromResult(result);
+      turnCost += recordUsage(ctx.db, { model: loadAiRefs(ctx.db).adminModel ?? 'unknown', input: usage.input, output: usage.output, cached: usage.cached });
       // The auto-executed write's result is in history; re-drive so the model wraps up.
       await driveLoop(ctx, channel, signal);
       return;
     }
     if (paused) {
-      turnCost += recordUsage(ctx.db, { model: loadAiRefs(ctx.db).adminModel ?? 'unknown', input: usage.input, output: usage.output });
+      usage = await usageFromResult(result); // same early-break: 'finish' never populated `usage`
+      turnCost += recordUsage(ctx.db, { model: loadAiRefs(ctx.db).adminModel ?? 'unknown', input: usage.input, output: usage.output, cached: usage.cached });
       return; // turn yields to the user; no 'done'
     }
 
     // Normal completion: persist the assistant message(s) + meter + done.
     const resp = await result.response;
     for (const m of resp.messages) appendMessage(ctx.db, ctx.conversationId, m as ModelMessage);
-    turnCost += recordUsage(ctx.db, { model: loadAiRefs(ctx.db).adminModel ?? 'unknown', input: usage.input, output: usage.output });
+    turnCost += recordUsage(ctx.db, { model: loadAiRefs(ctx.db).adminModel ?? 'unknown', input: usage.input, output: usage.output, cached: usage.cached });
     // Evaluate spend guardrails on true turn completion (best-effort; never throws).
     checkGuards(ctx.db, turnCost, steps);
     channel.send({ type: 'done', usage: { ...usage, total: usage.input + usage.output } });
@@ -347,9 +355,11 @@ function appendToolResult(ctx: AgentContext, toolName: string, result: unknown):
       if (call?.toolCallId) toolCallId = call.toolCallId;
     } catch { /* fall back to synthetic id */ }
   }
+  // Truncate before persisting: this message is re-sent on every later call of the conversation.
+  const capped = truncateToolResult(result);
   const toolMessage: ModelMessage = {
     role: 'tool',
-    content: [{ type: 'tool-result', toolCallId, toolName, output: { type: 'json', value: result as any } }]
+    content: [{ type: 'tool-result', toolCallId, toolName, output: { type: 'json', value: capped as any } }]
   } as unknown as ModelMessage;
   appendMessage(ctx.db, ctx.conversationId, toolMessage);
 }

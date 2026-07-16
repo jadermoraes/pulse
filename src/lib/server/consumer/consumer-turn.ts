@@ -14,18 +14,12 @@ import { getRole } from '../identity/roles';
 import { addUsage, isOverCap } from '../identity/usage';
 import { getConsumerModel, loadAiRefs } from '../agent/provider';
 import { recordUsage } from '../agent/cost';
+import { CACHE_OPTS, withHistoryCacheMarker } from '../agent/cache';
+import { usageFromResult } from '../agent/usage';
 
 const MAX_STEPS = 6;
 
-/**
- * Anthropic ephemeral prompt-cache marker. Verified against @ai-sdk/anthropic@3.0.81:
- * the provider reads `providerOptions.anthropic.cacheControl` PER message/content-part — NOT at
- * streamText's top level — and emits a `cache_control` breakpoint there (see
- * convertToAnthropicMessagesPrompt's `getCacheControl({ type: 'system message' })`).
- * Carried on the SYSTEM message below so the stable system prefix is cached.
- * Provider-agnostic: non-Anthropic providers ignore the `anthropic` namespace without error.
- */
-export const CACHE_OPTS = { anthropic: { cacheControl: { type: 'ephemeral' } } } as const;
+export { CACHE_OPTS };
 
 /** The system prompt as a cache-marked system message so the prefix is actually cached. */
 export function consumerSystemMessage(): SystemModelMessage {
@@ -125,14 +119,16 @@ async function driveConsumerLoop(
   const aiTools = toAiTools(ctx, specs);
   const messages = loadHistory(ctx.db, ctx.conversationId);
 
-  let usage = { input: 0, output: 0 };
+  let usage = { input: 0, output: 0, cached: 0 };
   try {
     const result = streamText({
       model: getConsumerModel(ctx.db)!,
       // Cache-marked system message: providerOptions ride WITH the system part, which is where
       // the Anthropic provider reads cacheControl and emits the cache_control breakpoint.
       system: consumerSystemMessage(),
-      messages,
+      // History breakpoint (send-time only): follow-up turns re-read the conversation at ~10%
+      // of the input rate instead of full price.
+      messages: withHistoryCacheMarker(messages),
       tools: aiTools,
       stopWhen: stepCountIs(MAX_STEPS),
       abortSignal: signal
@@ -157,8 +153,8 @@ async function driveConsumerLoop(
             }
             const out = await executeWriteInline(ctx, spec, name, args);
             channel.send({ type: 'tool_result', tool: name, result: out });
-            addUsage(ctx.db, consumerId, usage.input + usage.output);
-            recordUsage(ctx.db, { model: loadAiRefs(ctx.db).consumerModel ?? 'unknown', input: usage.input, output: usage.output });
+            // Metered in the autoResume block below, AFTER the stream drains — the 'finish' part
+            // that populates `usage` hasn't arrived yet when we break here.
             autoResume = true;
           } else {
             channel.send({ type: 'tool_call', tool: name, args });
@@ -167,8 +163,10 @@ async function driveConsumerLoop(
         }
         case 'tool-result': channel.send({ type: 'tool_result', tool: (part as { toolName: string }).toolName, result: (part as { output: unknown }).output }); break;
         case 'finish': {
-          const u = (part as { totalUsage?: { inputTokens?: number; outputTokens?: number } }).totalUsage ?? {};
-          usage = { input: u.inputTokens ?? 0, output: u.outputTokens ?? 0 };
+          const u = (part as { totalUsage?: { inputTokens?: number; outputTokens?: number; cachedInputTokens?: number } }).totalUsage ?? {};
+          // inputTokens is the TOTAL (includes cache reads); cachedInputTokens is the cache-read
+          // portion, billed at 10% by recordUsage.
+          usage = { input: u.inputTokens ?? 0, output: u.outputTokens ?? 0, cached: u.cachedInputTokens ?? 0 };
           break;
         }
         case 'error': channel.send({ type: 'error', message: String((part as { error: unknown }).error) }); break;
@@ -176,13 +174,18 @@ async function driveConsumerLoop(
       if (autoResume) break;
     }
     if (autoResume) {
+      // We broke out before 'finish' — read the REAL totals from the drained stream, so the
+      // consumer cap and the spend log see this invocation's tokens (they used to get zeros).
+      usage = await usageFromResult(result);
+      addUsage(ctx.db, consumerId, usage.input + usage.output);
+      recordUsage(ctx.db, { model: loadAiRefs(ctx.db).consumerModel ?? 'unknown', input: usage.input, output: usage.output, cached: usage.cached });
       await driveConsumerLoop(ctx, channel, consumerId, roleId, signal);
       return;
     }
     const resp = await result.response;
     for (const m of resp.messages) appendMessage(ctx.db, ctx.conversationId, m as ModelMessage, consumerId);
     addUsage(ctx.db, consumerId, usage.input + usage.output); // closes B's cap loop
-    recordUsage(ctx.db, { model: loadAiRefs(ctx.db).consumerModel ?? 'unknown', input: usage.input, output: usage.output });
+    recordUsage(ctx.db, { model: loadAiRefs(ctx.db).consumerModel ?? 'unknown', input: usage.input, output: usage.output, cached: usage.cached });
     channel.send({ type: 'done', usage: { ...usage, total: usage.input + usage.output } });
   } catch (e) {
     channel.send({ type: 'error', message: (e as Error).message });

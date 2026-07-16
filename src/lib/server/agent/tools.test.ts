@@ -13,7 +13,13 @@ import type { AgentContext } from './types';
 const stub: Integration = {
   type: 'stubsvc', label: 'Stub', icon: 'x', configSchema: [],
   async testConnection() { return { ok: true, message: 'ok' }; },
-  widgets: { queue: async () => ({ ok: true, data: [{ id: 1, title: 'X' }] }) },
+  widgets: {
+    queue: async () => ({ ok: true, data: [{ id: 1, title: 'X' }] }),
+    huge: async () => ({
+      ok: true,
+      data: Array.from({ length: 1000 }, (_, i) => ({ id: i, pad: 'x'.repeat(300) }))
+    })
+  },
   actions: {
     approve: { id: 'approve', label: 'Approve', kind: 'request',
       async run(conn, params) { return { ok: true, message: `approved ${params.id}` }; } },
@@ -349,5 +355,16 @@ describe('buildToolSpecs', () => {
     const aiTools = toAiTools(ctx, specs);
     expect(typeof (aiTools.getWidget as any).execute).toBe('function');
     expect((aiTools.runAction as any).execute).toBeUndefined();
+  });
+
+  it('read tool execute truncates oversized results before they reach the model', async () => {
+    const id = createConnection(db, { type: 'stubsvc', name: 'S', baseUrl: 'http://x', secret: 'KEY', options: {} });
+    const specs = await buildToolSpecs(ctx);
+    const aiTools = toAiTools(ctx, specs);
+    const out: any = await (aiTools.getWidget as any).execute({ connectionId: id, widget: 'huge' });
+    // The raw payload is ~320k chars; the model must never receive that much.
+    expect(JSON.stringify(out).length).toBeLessThan(50_000);
+    expect(out.data.truncated).toBe(true);
+    expect(out.data.items.length).toBeGreaterThan(0);
   });
 });

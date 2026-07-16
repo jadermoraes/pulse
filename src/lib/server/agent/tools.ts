@@ -18,6 +18,7 @@ import { listMyRequests, cancelMyRequest } from '../consumer/my-requests';
 import { mirrorFavorite } from '../consumer/jellyfin-favorite';
 import { submitConsumerMessage } from '../consumer/submit-message';
 import type { DB } from '../db';
+import { truncateToolResult } from './truncate';
 import type { AgentContext, ToolSpec } from './types';
 
 // Disk mounts to report (mirrors /api/server/stats).
@@ -496,9 +497,12 @@ export function toAiTools(ctx: AgentContext, specs: ToolSpec[]): Record<string, 
         // while fetching releases) would otherwise error the stream and leave a dangling
         // tool-call in history that breaks every later turn. Return the error as the tool result
         // so the model can recover and tell the user what went wrong.
+        // Results are truncated HERE, before the SDK feeds them back to the model — an unbounded
+        // payload (a full /api/v3/release list is ~300k chars) would otherwise be persisted into
+        // history and re-billed on every later call of the conversation.
         async execute(args) {
           try {
-            return await spec.run(ctx, args as Record<string, unknown>);
+            return truncateToolResult(await spec.run(ctx, args as Record<string, unknown>));
           } catch (e) {
             return { ok: false, error: `${spec.name} failed: ${(e as Error).message}` };
           }

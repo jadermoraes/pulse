@@ -16,6 +16,22 @@ it('estimateCost computes USD from token counts', () => {
   expect(estimateCost('claude-sonnet-4-6', 1000, 0)).toBeCloseTo(0.003, 6);
 });
 
+it('estimateCost bills cached input tokens at 10% of the input rate', () => {
+  // All 1M input tokens came from cache reads → 1M × $3/M × 0.1 = $0.30.
+  expect(estimateCost('claude-sonnet-4-6', 1_000_000, 0, 1_000_000)).toBeCloseTo(0.3, 5);
+  // Half cached: 500k × $3/M + 500k × $0.3/M = $1.65.
+  expect(estimateCost('claude-sonnet-4-6', 1_000_000, 0, 500_000)).toBeCloseTo(1.65, 5);
+  // No cached tokens → unchanged legacy behavior.
+  expect(estimateCost('claude-sonnet-4-6', 1_000_000, 0, 0)).toBeCloseTo(3, 5);
+});
+
+it('recordUsage logs total input tokens but bills cached ones at the discounted rate', () => {
+  const cost = recordUsage(db, { model: 'claude-sonnet-4-6', input: 1_000_000, output: 0, cached: 1_000_000 });
+  expect(cost).toBeCloseTo(0.3, 5);
+  const rows = usageByModel(db, 0);
+  expect(rows[0].input).toBe(1_000_000); // analytics still see the full input volume
+});
+
 it('recordUsage inserts a log row with computed cost', () => {
   const cost = recordUsage(db, { model: 'claude-sonnet-4-6', input: 1000, output: 1000 });
   expect(cost).toBeCloseTo(0.018, 6);
