@@ -92,6 +92,10 @@ function systemPrompt(): string {
     '  directly — do NOT ask the user to confirm in your reply or wait for them to type a',
     '  confirmation; the app handles approval via its own UI (a confirmation card, or auto-run).',
     '  Do not claim a write succeeded until you receive its tool result.',
+    '- ONE write per message. If a task needs several writes (e.g. fix a quality profile AND remove',
+    '  three queue items), issue the FIRST write alone, wait for its tool result, THEN issue the',
+    '  next. Batching multiple write tool-calls in a single message is a failure: only the first is',
+    '  confirmed and executed, the rest are dropped, and you will repeat the plan in a loop.',
     '- Report tool outcomes TRUTHFULLY and consistently with the most recent tool result. If a tool',
     '  returns success (HTTP 2xx, or a body with success_count>0 / added / ok / an id), tell the user',
     '  it SUCCEEDED and what happened. NEVER say an action failed, or that you "cannot do it", when',
@@ -132,14 +136,20 @@ function toolResultIds(msg: ModelMessage): string[] {
 }
 
 /**
- * Drop a trailing, incomplete tool exchange so the provider never rejects the whole conversation.
+ * Heal incomplete tool exchanges so the provider never rejects the whole conversation.
  *
- * A turn that crashed mid-write (write tool threw after its assistant tool-call was persisted) or
- * a confirmation the user abandoned leaves an assistant tool-call with NO matching tool-result.
- * Providers (Anthropic/OpenAI) reject any request whose tool_use ids lack tool_result — which
- * permanently breaks every later turn ("no more replies"). We truncate from the first assistant
- * message whose tool-calls aren't all answered; incomplete exchanges only ever occur at the tail,
- * so this heals poisoned conversations without discarding good history.
+ * Providers (Anthropic/OpenAI) reject any request whose tool_use ids lack a matching tool_result,
+ * which permanently breaks every later turn ("no more replies"). Two failure shapes:
+ *
+ *  - A message where NONE of its tool-calls are answered — a crashed turn or a confirmation the
+ *    user abandoned, always at the tail. We truncate from there; nothing of value is lost.
+ *  - A message where SOME calls ran but others did not. This is the multi-write case: the model
+ *    emitted several write tool-calls in one message ("fix the profile AND remove all three queue
+ *    items"), the loop paused + confirmed only the FIRST, so that one has a real result and the
+ *    siblings dangle. Truncating the whole message would delete the real result too — so the model
+ *    forgets it ever acted and repeats the identical plan forever (an amnesia loop). Instead we
+ *    KEEP the message and synthesize a "superseded" result for each dangling call: the history
+ *    stays provider-valid AND the model remembers what already ran.
  */
 export function sanitizeHistory(messages: ModelMessage[]): ModelMessage[] {
   const answered = new Set<string>();
@@ -148,10 +158,44 @@ export function sanitizeHistory(messages: ModelMessage[]): ModelMessage[] {
   const out: ModelMessage[] = [];
   for (const m of messages) {
     const calls = toolCallIds(m);
-    if (calls.length && !calls.every((id) => answered.has(id))) break; // truncate here onward
+    if (calls.length) {
+      const answeredHere = calls.filter((id) => answered.has(id));
+      if (answeredHere.length === 0) break; // fully-unanswered tail: truncate from here onward
+      if (answeredHere.length < calls.length) {
+        // Partially answered: keep the message, then backfill the dangling calls so a real
+        // result already in history (a write that DID run) is never truncated away with it.
+        out.push(m);
+        for (const id of calls) if (!answered.has(id)) out.push(supersededToolResult(m, id));
+        continue;
+      }
+    }
     out.push(m);
   }
   return out;
+}
+
+/**
+ * A placeholder tool-result for a queued tool-call that never executed — its sibling write paused
+ * the turn and only that one ran. Marks the call superseded (not a faked success) so the model
+ * knows to re-issue it if still needed, and keeps every tool_use id answered for the provider.
+ */
+function supersededToolResult(assistant: ModelMessage, toolCallId: string): ModelMessage {
+  const content = (assistant as { content?: unknown }).content;
+  const call = Array.isArray(content)
+    ? (content as any[]).find((p) => p?.type === 'tool-call' && p.toolCallId === toolCallId)
+    : null;
+  const toolName = (call as { toolName?: string } | null)?.toolName ?? 'unknown';
+  return {
+    role: 'tool',
+    content: [{
+      type: 'tool-result', toolCallId, toolName,
+      output: { type: 'json', value: {
+        ok: false, superseded: true,
+        message: 'Not executed: this tool-call was queued alongside another write that paused the ' +
+          'turn, so it never ran. Re-issue it (one write per message) if it is still needed.'
+      } }
+    }]
+  } as unknown as ModelMessage;
 }
 
 function appendMessage(db: DB, conversationId: number, msg: ModelMessage, tokens = 0): void {

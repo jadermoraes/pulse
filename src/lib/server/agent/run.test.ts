@@ -85,6 +85,34 @@ describe('sanitizeHistory — heal dangling tool-calls', () => {
     expect(sanitizeHistory(h)).toEqual([userMsg]);
   });
 
+  it('keeps a partially-answered multi-call message and synthesizes results for dangling calls', () => {
+    // The amnesia-loop repro: the model emitted [c1, c2, c3] in ONE message (e.g. "fix the
+    // profile AND remove all three queue items"), the turn paused on c1, the admin approved it,
+    // c1 ran and got a real result — but c2/c3 never ran. The OLD sanitizeHistory truncated the
+    // whole message (all-or-nothing), erasing c1's real result, so the model forgot it had acted
+    // and repeated the plan forever. Now the message + its real result must survive.
+    const asstMulti = { role: 'assistant', content: [
+      { type: 'tool-call', toolCallId: 'c1', toolName: 't', input: {} },
+      { type: 'tool-call', toolCallId: 'c2', toolName: 't', input: {} },
+      { type: 'tool-call', toolCallId: 'c3', toolName: 't', input: {} }
+    ] } as unknown as ModelMessage;
+    const out = sanitizeHistory([userMsg, asstMulti, toolResult('c1')]);
+
+    // The assistant message and c1's real result are retained (no amnesia).
+    expect(out).toContain(asstMulti);
+    // Every tool-call now has a result, so the provider will accept the history.
+    const answered = new Set<string>();
+    for (const m of out)
+      for (const p of ((m as any).content ?? []))
+        if (p?.type === 'tool-result') answered.add(p.toolCallId);
+    expect([...answered].sort()).toEqual(['c1', 'c2', 'c3']);
+    // The synthesized results are marked superseded — NOT faked as success.
+    const synth = out
+      .flatMap((m) => ((m as any).content ?? []))
+      .find((p: any) => p?.type === 'tool-result' && p.toolCallId === 'c2');
+    expect((synth.output.value as any).superseded).toBe(true);
+  });
+
   it('leaves plain conversations untouched', () => {
     const h = [userMsg, asstText, userMsg, asstText];
     expect(sanitizeHistory(h)).toHaveLength(4);
