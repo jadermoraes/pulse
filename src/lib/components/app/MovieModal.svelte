@@ -17,6 +17,9 @@
   let busy = $state(false);
   let done = $state(false);
   let reqError = $state(false);
+  // Audio preference for the request: 'original' (seerr's default profile) or 'ptbr' (the
+  // Brazilian-Portuguese quality profile). Only meaningful for movies/series not yet on the server.
+  let audio = $state<'original' | 'ptbr'>('original');
 
   // Report-a-problem composer state.
   let reportOpen = $state(false);
@@ -108,7 +111,7 @@
       const res = await fetch('/api/app/request', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tmdbId: item.tmdbId, mediaType: item.mediaType })
+        body: JSON.stringify({ tmdbId: item.tmdbId, mediaType: item.mediaType, audio })
       });
       if (res.ok) { done = true; onRequested(); }
       else reqError = true;
@@ -212,6 +215,22 @@
         {:else if requested}
           <button class="act act-requested" disabled>{$_('app.requestedProcessing')}</button>
         {:else if !available && !onServer}
+          <div class="audio-toggle" role="group" aria-label={$_('app.audioLabel')}>
+            <button
+              type="button"
+              class="audio-opt"
+              class:sel={audio === 'ptbr'}
+              onclick={() => (audio = 'ptbr')}
+              disabled={busy}
+            >🇧🇷 {$_('app.audioPtbr')}</button>
+            <button
+              type="button"
+              class="audio-opt"
+              class:sel={audio === 'original'}
+              onclick={() => (audio = 'original')}
+              disabled={busy}
+            >{$_('app.audioOriginal')}</button>
+          </div>
           <button class="act act-request" onclick={request} disabled={busy}>
             {busy ? $_('app.loading') : $_('app.request')}
           </button>
@@ -457,6 +476,34 @@
   }
   .act:hover:not(:disabled) { filter: brightness(1.06); }
   .req-error { color: #ff7a92; font-size: 0.82rem; margin: 0.6rem 0 0; }
+
+  /* Audio (quality-profile) toggle shown above the Request button */
+  .audio-toggle {
+    display: inline-flex;
+    gap: 0.25rem;
+    padding: 0.25rem;
+    margin-bottom: 0.6rem;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--card-brd, rgba(255, 255, 255, 0.12));
+    border-radius: 0.7rem;
+  }
+  .audio-opt {
+    flex: 1;
+    padding: 0.4rem 0.75rem;
+    border: none;
+    border-radius: 0.5rem;
+    background: none;
+    color: var(--sub, #8b95a7);
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .audio-opt.sel {
+    background: color-mix(in srgb, var(--accent2, #36c6ff) 16%, transparent);
+    color: var(--accent2, #36c6ff);
+  }
+  .audio-opt:disabled { cursor: default; }
 
   /* Report a problem */
   .report-section { margin-top: 1rem; }

@@ -24,8 +24,17 @@ describe('/api/app/request + /api/app/requests', () => {
       .mockResolvedValue({ id: 1, consumerId: 7, status: 'pending' } as any);
     const req = new Request('http://x', { method: 'POST', body: JSON.stringify({ tmdbId: 100, mediaType: 'movie', consumerId: 999 }) });
     const res = await requestPOST({ locals: { consumer }, request: req, getClientAddress: () => '127.0.0.1' } as any);
-    expect(spy).toHaveBeenCalledWith(db, { id: 7, seerrUserId: 42 }, { tmdbId: 100, mediaType: 'movie' });
+    expect(spy).toHaveBeenCalledWith(db, { id: 7, seerrUserId: 42 }, { tmdbId: 100, mediaType: 'movie', audio: 'original' });
     expect((await res.json()).consumerId).toBe(7);
+  });
+
+  it('forwards audio:"ptbr" to the request creator', async () => {
+    vi.spyOn(consumers, 'getConsumer').mockReturnValue({ id: 7, seerrUserId: 42 } as any);
+    const spy = vi.spyOn(reqmod, 'createConsumerRequest')
+      .mockResolvedValue({ id: 1, consumerId: 7, status: 'pending' } as any);
+    const req = new Request('http://x', { method: 'POST', body: JSON.stringify({ tmdbId: 920, mediaType: 'movie', audio: 'ptbr' }) });
+    await requestPOST({ locals: { consumer }, request: req, getClientAddress: () => '127.0.0.1' } as any);
+    expect(spy).toHaveBeenCalledWith(db, { id: 7, seerrUserId: 42 }, { tmdbId: 920, mediaType: 'movie', audio: 'ptbr' });
   });
 
   it('GET lists only the session consumer requests', async () => {

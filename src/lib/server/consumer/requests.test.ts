@@ -41,6 +41,35 @@ describe('consumer requests', () => {
     expect(r.consumerId).toBe(7);
   });
 
+  it('resolves audio:"ptbr" to the PT-BR quality profile and sends profileId + serverId', async () => {
+    const send = vi.spyOn(http, 'sendJsonWithKey').mockResolvedValue({ id: 777 } as any);
+    // getJsonWithKey serves the seerr service endpoints (profile discovery) + the detail title.
+    vi.spyOn(http, 'getJsonWithKey').mockImplementation(async (url: string) => {
+      if (url.includes('/service/radarr/')) {
+        return { profiles: [{ id: 7, name: 'Standard 1080p' }, { id: 8, name: 'Standard 1080p (PT-BR)' }] } as any;
+      }
+      if (url.includes('/service/radarr')) return [{ id: 0, isDefault: true }] as any;
+      return { title: 'Cars' } as any;
+    });
+    await createConsumerRequest(db, consumer(), { tmdbId: 920, mediaType: 'movie', audio: 'ptbr' });
+    expect(send).toHaveBeenCalledWith(
+      expect.stringContaining('/api/v1/request'), 'POST', 'K',
+      { mediaType: 'movie', mediaId: 920, userId: 42, profileId: 8, serverId: 0 }
+    );
+  });
+
+  it('does NOT add a profile for audio:"original" (uses seerr default)', async () => {
+    const send = vi.spyOn(http, 'sendJsonWithKey').mockResolvedValue({ id: 1 } as any);
+    const get = vi.spyOn(http, 'getJsonWithKey').mockResolvedValue({ title: 'Cars' } as any);
+    await createConsumerRequest(db, consumer(), { tmdbId: 920, mediaType: 'movie', audio: 'original' });
+    expect(send).toHaveBeenCalledWith(
+      expect.any(String), 'POST', 'K',
+      { mediaType: 'movie', mediaId: 920, userId: 42 }
+    );
+    // no /service/* discovery calls when audio isn't ptbr
+    expect(get.mock.calls.every(([u]) => !String(u).includes('/service/'))).toBe(true);
+  });
+
   it('adds seasons:"all" for tv requests', async () => {
     const send = vi.spyOn(http, 'sendJsonWithKey').mockResolvedValue({ id: 9 } as any);
     vi.spyOn(http, 'getJsonWithKey').mockResolvedValue({ name: 'Severance' } as any);

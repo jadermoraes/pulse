@@ -7,6 +7,33 @@ import { publicBase } from '../public-url';
 // request.status (MediaRequestStatus): 1=Pending, 2=Approved, 3=Declined, 4=Failed, 5=Completed
 // media.status (MediaStatus):          1=Unknown, 2=Pending, 3=Processing, 4=Partially Available, 5=Available
 
+/**
+ * Resolve the *arr quality profile for a request's audio preference.
+ *
+ * 'ptbr' → the profile whose name matches PT-BR on the default radarr (movie) / sonarr (tv)
+ * server, so the request grabs the Brazilian-Portuguese profile instead of seerr's server
+ * default. Anything else → {} (let seerr use its default). Best-effort: any failure returns {},
+ * so a request never breaks just because profile discovery hiccupped.
+ */
+export async function resolveAudioProfile(
+  conn: Connection, mediaType: 'movie' | 'tv', audio: string | undefined
+): Promise<{ profileId?: number; serverId?: number }> {
+  if (audio !== 'ptbr') return {};
+  const svc = mediaType === 'tv' ? 'sonarr' : 'radarr';
+  try {
+    const servers = await getJsonWithKey(joinUrl(conn.baseUrl, `/api/v1/service/${svc}`), conn.secret);
+    const list = Array.isArray(servers) ? servers : [];
+    const server = list.find((s: { isDefault?: boolean }) => s.isDefault) ?? list[0];
+    if (!server) return {};
+    const detail = await getJsonWithKey(joinUrl(conn.baseUrl, `/api/v1/service/${svc}/${server.id}`), conn.secret);
+    const profiles: Array<{ id: number; name: string }> = Array.isArray(detail?.profiles) ? detail.profiles : [];
+    const ptbr = profiles.find((p) => /pt[\s._-]?br/i.test(String(p.name)));
+    return ptbr ? { profileId: Number(ptbr.id), serverId: Number(server.id) } : {};
+  } catch {
+    return {};
+  }
+}
+
 // TMDB status / release-date → has the title been released yet?
 function isReleased(tmdbStatus: string | undefined, releaseDate: string | undefined): boolean {
   if (releaseDate) {
@@ -156,6 +183,15 @@ export const seerr: Integration = {
           ...(mediaType === 'tv' ? { seasons: 'all' } : {}),
           ...(params.userId != null ? { userId: Number(params.userId) } : {})
         };
+        // Audio/profile targeting: an explicit profileId wins; otherwise audio:'ptbr' resolves
+        // to the PT-BR quality profile. Neither present → seerr's server default.
+        const prof = params.profileId != null
+          ? { profileId: Number(params.profileId), serverId: params.serverId != null ? Number(params.serverId) : undefined }
+          : await resolveAudioProfile(conn, mediaType, params.audio != null ? String(params.audio) : undefined);
+        if (prof.profileId != null) {
+          body.profileId = prof.profileId;
+          if (prof.serverId != null) body.serverId = prof.serverId;
+        }
         const res = await sendJsonWithKey(joinUrl(conn.baseUrl, '/api/v1/request'), 'POST', conn.secret, body);
         return { ok: true, message: 'Requested', request: res };
       } },

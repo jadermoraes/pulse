@@ -1,6 +1,7 @@
 import type { DB } from '../db';
 import { listConnections, type Connection } from '../connections';
 import { joinUrl, getJsonWithKey, sendJsonWithKey } from '../http';
+import { resolveAudioProfile } from '../integrations/seerr';
 import { resolveWidget } from '../../widgets';
 import { SEERR_PATHS, type ConsumerRequest, type ConsumerRequestStatus } from './types';
 import type { ConsumerUser } from '../identity/types';
@@ -31,12 +32,19 @@ export function mapSeerrLabel(label: string): ConsumerRequestStatus {
 }
 
 export async function createConsumerRequest(
-  db: DB, consumer: Pick<ConsumerUser, 'id' | 'seerrUserId'>, m: { tmdbId: number; mediaType: 'movie' | 'tv' }
+  db: DB, consumer: Pick<ConsumerUser, 'id' | 'seerrUserId'>,
+  m: { tmdbId: number; mediaType: 'movie' | 'tv'; audio?: 'ptbr' | 'original' }
 ): Promise<ConsumerRequest> {
   const seerr = seerrConn(db);
   if (!seerr) throw new Error('No seerr connection configured');
   const body: Record<string, unknown> = { mediaType: m.mediaType, mediaId: m.tmdbId, userId: consumer.seerrUserId };
   if (m.mediaType === 'tv') body.seasons = 'all';
+  // Audio preference → quality profile (PT-BR vs seerr's server default). Best-effort.
+  const prof = await resolveAudioProfile(seerr, m.mediaType, m.audio);
+  if (prof.profileId != null) {
+    body.profileId = prof.profileId;
+    if (prof.serverId != null) body.serverId = prof.serverId;
+  }
   const created = await sendJsonWithKey(joinUrl(seerr.baseUrl, SEERR_PATHS.request), 'POST', seerr.secret, body);
   const seerrRequestId: number | null = typeof (created as any)?.id === 'number' ? (created as any).id : null;
 
