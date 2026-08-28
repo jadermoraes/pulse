@@ -578,5 +578,16 @@
     "recapRequest": "Pedir",
     "recapAsk": "Perguntar",
     "recapNotified": "Ser avisado"
+  },
+  "trakt": {
+    "title": "Trakt",
+    "description": "Sincroniza o que você assiste com sua conta do Trakt.",
+    "connect": "Conectar Trakt",
+    "disconnect": "Desconectar",
+    "codeInstructions": "Acesse {url} e digite este código:",
+    "waiting": "Esperando você aprovar no trakt.tv…",
+    "linked": "Conectado",
+    "expired": "O código expirou. Tente de novo.",
+    "notConfigured": "O Trakt não está configurado neste servidor."
   }
 }

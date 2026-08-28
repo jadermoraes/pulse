@@ -148,3 +148,34 @@ dB('accounts schema (sub-project B)', () => {
     eB(cu).toContain('jellyfin_username');
   });
 });
+
+import { describe as dSH, it as iSH, expect as eSH } from 'vitest';
+import { openDb as openDbSH, migrate as migrateSH } from './db';
+
+dSH('sync hub schema', () => {
+  iSH('migrate creates the sync hub tables', () => {
+    const db = openDbSH(':memory:');
+    migrateSH(db);
+    const names = (db.prepare(
+      "SELECT name FROM sqlite_master WHERE type='table'"
+    ).all() as Array<{ name: string }>).map((r) => r.name);
+    eSH(names).toContain('watch_plays');
+    eSH(names).toContain('spoke_credentials');
+    eSH(names).toContain('sync_state');
+    eSH(names).toContain('consumer_ratings');
+  });
+
+  iSH('watch_plays rejects a duplicate (consumer, source, source_row)', () => {
+    const db = openDbSH(':memory:');
+    migrateSH(db);
+    // Seed a consumer_users row for the foreign key constraint
+    db.prepare('INSERT INTO consumer_users(role_id, display_name, created_at) VALUES(?, ?, ?)')
+      .run(1, 'Test Consumer', Date.now());
+    const ins = db.prepare(
+      `INSERT INTO watch_plays(consumer_id,tmdb_id,imdb_id,media_type,season,episode,watched_at,source,source_row)
+       VALUES (?,?,?,?,?,?,?,?,?)`
+    );
+    ins.run(1, 550, 'tt0137523', 'movie', null, null, 1000, 'tautulli', 42);
+    eSH(() => ins.run(1, 550, 'tt0137523', 'movie', null, null, 2000, 'tautulli', 42)).toThrow();
+  });
+});

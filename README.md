@@ -193,6 +193,7 @@ Most setup is in-app (**Settings**). Key env vars:
 | `PULSE_EVENT_POLL_MS` | `120000` | Event-poller interval. |
 | `PULSE_PUBLIC_HOST` / `PULSE_PUBLIC_URL` | _(unset)_ | When set, serve **only** the consumer PWA on that hostname (public exposure guard). |
 | `PULSE_AGENT_FAKE` / `PULSE_PROVISION_FAKE` | _(unset)_ | **Test-only** hermetic fakes for the LLM + provisioning boundaries. |
+| `PULSE_TRAKT_CLIENT_ID` / `PULSE_TRAKT_CLIENT_SECRET` | _(unset)_ | Trakt.tv history sync. Register an app at [trakt.tv/oauth/applications](https://trakt.tv/oauth/applications) with redirect URI `urn:ietf:wg:oauth:2.0:oob`. Without **both**, the feature is inert. |
 
 > Provider API keys and MCP credentials are **not** env vars — entered in-app and stored **encrypted**.
 

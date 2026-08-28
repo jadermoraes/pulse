@@ -215,6 +215,57 @@ export function migrate(db: DB): void {
       consumer_message_id INTEGER NOT NULL,
       PRIMARY KEY (chat_id, message_id)
     );
+    CREATE TABLE IF NOT EXISTS watch_plays (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      consumer_id  INTEGER NOT NULL REFERENCES consumer_users(id) ON DELETE CASCADE,
+      tmdb_id      INTEGER,
+      imdb_id      TEXT,
+      media_type   TEXT NOT NULL,
+      season       INTEGER,
+      episode      INTEGER,
+      watched_at   INTEGER NOT NULL,
+      source       TEXT NOT NULL,
+      source_row   INTEGER,
+      UNIQUE(consumer_id, source, source_row)
+    );
+    CREATE INDEX IF NOT EXISTS idx_watch_plays_consumer ON watch_plays(consumer_id, watched_at);
+    CREATE TABLE IF NOT EXISTS spoke_credentials (
+      consumer_id  INTEGER NOT NULL REFERENCES consumer_users(id) ON DELETE CASCADE,
+      spoke        TEXT NOT NULL,
+      secret       TEXT NOT NULL,
+      refresh      TEXT,
+      expires_at   INTEGER,
+      enabled      INTEGER NOT NULL DEFAULT 1,
+      fail_count   INTEGER NOT NULL DEFAULT 0,
+      last_sync_at INTEGER,
+      last_error   TEXT,
+      created_at   INTEGER NOT NULL,
+      PRIMARY KEY (consumer_id, spoke)
+    );
+    CREATE TABLE IF NOT EXISTS sync_state (
+      consumer_id  INTEGER NOT NULL REFERENCES consumer_users(id) ON DELETE CASCADE,
+      spoke        TEXT NOT NULL,
+      entity       TEXT NOT NULL,
+      tmdb_id      INTEGER NOT NULL,
+      media_type   TEXT NOT NULL,
+      synced_at    INTEGER,
+      dropped_at   INTEGER,
+      PRIMARY KEY (consumer_id, spoke, entity, tmdb_id, media_type)
+    );
+    CREATE TABLE IF NOT EXISTS consumer_ratings (
+      consumer_id  INTEGER NOT NULL REFERENCES consumer_users(id) ON DELETE CASCADE,
+      tmdb_id      INTEGER NOT NULL,
+      media_type   TEXT NOT NULL,
+      rating       INTEGER NOT NULL,
+      rated_at     INTEGER NOT NULL,
+      PRIMARY KEY (consumer_id, tmdb_id, media_type)
+    );
+    CREATE TABLE IF NOT EXISTS plex_guid_cache (
+      rating_key   TEXT PRIMARY KEY,
+      tmdb_id      INTEGER,
+      imdb_id      TEXT,
+      cached_at    INTEGER NOT NULL
+    );
   `);
 
   // Seed the built-in, immutable Admin role exactly once (idempotent: name is UNIQUE).

@@ -9,6 +9,8 @@ import { notifyConsumer, notifyAdmins } from '../notify';
 import { listPendingNotify, consumersAwaiting, markOnServer } from '../consumer/watchlist';
 import { mirrorFavorite } from '../consumer/jellyfin-favorite';
 import { joinUrl, getJsonWithKey } from '../http';
+import { ingestPlays } from '../consumer/plays-ingest';
+import { pollTraktHistory } from '../consumer/trakt-sync';
 
 export interface EventRow {
   id: number; ts: number; source: string; type: string;
@@ -262,7 +264,10 @@ export async function tickPoll(db: DB): Promise<void> {
   _running = true;
   try {
     await pollEvents(db);
+    const tautulli = listConnections(db).find((c) => c.type === 'tautulli' && c.enabled);
+    if (tautulli) await ingestPlays(db, tautulli).catch(() => { /* best-effort */ });
     await pollWatchlistAvailability(db);
+    await pollTraktHistory(db).catch(() => { /* best-effort */ });
     pruneEvents(db); // remove read events older than 7 days to keep the table trim
   }
   catch { /* swallowed: each source is already isolated inside pollEvents */ }
