@@ -1,7 +1,7 @@
 # Stremio Library Sync — Design
 
 **Date:** 2026-08-28
-**Status:** Approved design, not yet planned or implemented
+**Status:** Approved design; both open questions verified 2026-08-28; planned in `docs/superpowers/plans/2026-08-28-stremio-watchlist-sync.md`
 **Scope:** Two-way sync between a consumer's pulse watchlist and their Stremio Library, shipped in two stages (push first, then pull).
 
 > **Superseded in part by `2026-08-28-sync-hub-design.md`.** That document generalizes this one
@@ -55,14 +55,21 @@ this feature requires no addon, no manifest, and no inbound hosting; it is outbo
 This API is undocumented and carries no stability promise. Every design decision below assumes it
 can change or disappear without notice.
 
-### Unverified before implementation
+### Verified before implementation (2026-08-28, probed against the live services)
 
-1. Whether `authKey` is obtainable via a real login endpoint (email + password) or must be lifted
-   from browser `localStorage`. This changes Section "Linking" from a form to a copy-paste chore.
-2. Whether Seerr exposes a reverse **imdb → tmdb** lookup for the import direction. The forward
-   direction is free; the reverse may require a direct TMDB call and a TMDB API key.
+1. **`authKey` comes from a real login endpoint.** `POST https://api.strem.io/api/login` with
+   `{ email, password, type: "Login" }` returns a structured JSON response; a deliberately-bad
+   probe returned `{"error":{"code":2,"message":"User not found","wrongEmail":true}}`. Linking is
+   therefore a form in the consumer app, not a copy-the-key-from-devtools chore. The password is
+   used once and never persisted.
+2. **The reverse imdb → tmdb lookup does not need Seerr or a TMDB key.** Cinemeta — Stremio's own
+   metadata addon — answers it for free and unauthenticated:
+   `GET https://v3-cinemeta.strem.io/meta/movie/tt0111161.json` returns
+   `{ meta: { imdb_id: "tt0111161", moviedb_id: 278, name, year, type, ... } }`. Use
+   `/meta/series/<tt-id>.json` for shows. This is the right source by construction: it is the same
+   catalogue Stremio itself resolves against.
 
-Both must be resolved during planning, before code is written.
+Forward tmdb → imdb still comes from Seerr (`integrations/seerr.ts:265`), which is already wired.
 
 ## Decisions
 
