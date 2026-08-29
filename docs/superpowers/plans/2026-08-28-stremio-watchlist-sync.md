@@ -1366,7 +1366,9 @@ documented unknown (the exact new-item payload).
 
 1. Deploy: sync the changed files to `/docker/pulse` on `homelab-docker`, then
    `docker compose up -d --build`. Confirm `curl localhost:3002/` returns 303.
-2. Link Stremio in the consumer app with your email and password.
+2. **There is no settings UI yet** (same as the Trakt spoke — the plan scoped this to the endpoint and the copy). Link by POSTing with a live consumer session cookie:
+   `curl -X POST http://<pulse>/api/app/stremio -H 'Content-Type: application/json' -b 'the consumer session cookie' -d '{"email":"...","password":"..."}'`
+   The password is used for that one call and never stored. Check status any time with `GET /api/app/stremio`.
 3. **Before trusting a write, read.** Confirm `datastoreGet` returned your real library — the
    orchestrator uses its first item as the field-shape template for anything it creates.
 4. Add a title to your pulse watchlist. Within ~2 minutes it should appear in Stremio's Library
@@ -1374,7 +1376,10 @@ documented unknown (the exact new-item payload).
 5. Remove that title in Stremio by hand. On the next cycle it should disappear from the pulse
    watchlist.
 6. Add a different title in Stremio. It should appear on the pulse watchlist within a cycle.
-7. **Check nothing was clobbered:** open something you had partly watched in Stremio and confirm
+7. **Confirm `datastoreGet` returned your WHOLE library, not a page.** `all: true` is the one request parameter in this branch that was never probed against the live API. If Stremio paginates or caps that response, a title outside the page reads as absent, gets pushed, and is rebuilt from a template with `state` zeroed — and `datastorePut` is a full-document replace, so real watch progress would be destroyed. Count the returned items against your real Library before trusting any write. A short library on the first link makes this cheap.
+8. **Watch `last_error` on `GET /api/app/stremio` after every step** — it is currently the only operator signal.
+9. **Expect these, they are not regressions:** a duplicated request still shows twice in the Requests list and can fire two "Ready to watch" notifications (the sync view collapses the duplicates, the notification path deliberately was not touched); newly pushed items ship some optional fields as `null`, so check one renders correctly in the Stremio client; and a title you saved in Stremio yourself is never dropped when it lands, by design — deleting something you added by hand would be worse.
+10. **Check nothing was clobbered:** open something you had partly watched in Stremio and confirm
    your progress is still there. The push path is read-modify-write specifically to protect that
    `state` object; this is the check that proves it.
 
