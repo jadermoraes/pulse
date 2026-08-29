@@ -10,6 +10,7 @@ import { listPendingNotify, consumersAwaiting, markOnServer } from '../consumer/
 import { mirrorFavorite } from '../consumer/jellyfin-favorite';
 import { joinUrl, getJsonWithKey } from '../http';
 import { ingestPlays } from '../consumer/plays-ingest';
+import { ingestJellystatPlays } from '../consumer/jellystat-ingest';
 import { pollTraktHistory } from '../consumer/trakt-sync';
 
 export interface EventRow {
@@ -266,6 +267,11 @@ export async function tickPoll(db: DB): Promise<void> {
     await pollEvents(db);
     const tautulli = listConnections(db).find((c) => c.type === 'tautulli' && c.enabled);
     if (tautulli) await ingestPlays(db, tautulli).catch(() => { /* best-effort */ });
+    const jellystat = listConnections(db).find((c) => c.type === 'jellystat' && c.enabled);
+    const jellyfin = listConnections(db).find((c) => c.type === 'jellyfin' && c.enabled);
+    if (jellystat && jellyfin) {
+      await ingestJellystatPlays(db, jellystat, jellyfin).catch(() => { /* best-effort */ });
+    }
     await pollWatchlistAvailability(db);
     await pollTraktHistory(db).catch(() => { /* best-effort */ });
     pruneEvents(db); // remove read events older than 7 days to keep the table trim

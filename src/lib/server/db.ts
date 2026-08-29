@@ -266,6 +266,14 @@ export function migrate(db: DB): void {
       imdb_id      TEXT,
       cached_at    INTEGER NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS jellyfin_item_cache (
+      item_id         TEXT PRIMARY KEY,
+      item_type       TEXT,
+      tmdb_id         INTEGER,
+      imdb_id         TEXT,
+      runtime_seconds INTEGER,
+      cached_at       INTEGER NOT NULL
+    );
   `);
 
   // Seed the built-in, immutable Admin role exactly once (idempotent: name is UNIQUE).
@@ -280,6 +288,16 @@ export function migrate(db: DB): void {
   db.exec(`
     CREATE UNIQUE INDEX IF NOT EXISTS idx_consumer_plex
     ON consumer_users(plex_account_id) WHERE plex_account_id IS NOT NULL
+  `);
+
+  // Enforce 1 Jellyfin user → 1 consumer, mirroring idx_consumer_plex above: without this, two
+  // consumers sharing a jellyfin_user_id would let the Jellystat ingest's user map silently
+  // resolve to whichever row SQLite returns last, routing one viewer's Jellyfin history to
+  // another viewer's public Trakt profile. NULL and '' are both excluded (a blank id, like a
+  // NULL one, means "not linked" and must never collide).
+  db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_consumer_jellyfin
+    ON consumer_users(jellyfin_user_id) WHERE jellyfin_user_id IS NOT NULL AND jellyfin_user_id <> ''
   `);
 
   // Add nullable consumer_id to the agent tables only if it does not already exist
