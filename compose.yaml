@@ -15,6 +15,14 @@ services:
       # rather than the container's own namespaced view.
       - PULSE_PROC_ROOT=/host/proc
       - PULSE_SYS_ROOT=/host/sys
+      # Trakt sync. Register an app at https://trakt.tv/oauth/applications with
+      # redirect URI urn:ietf:wg:oauth:2.0:oob, then put the two values in a
+      # `.env` file next to this compose file (git-ignored, never committed):
+      #   PULSE_TRAKT_CLIENT_ID=...
+      #   PULSE_TRAKT_CLIENT_SECRET=...
+      # Unset is fine — the Trakt spoke stays inert and ingest still runs.
+      - PULSE_TRAKT_CLIENT_ID=${PULSE_TRAKT_CLIENT_ID:-}
+      - PULSE_TRAKT_CLIENT_SECRET=${PULSE_TRAKT_CLIENT_SECRET:-}
     volumes:
       - pulse_data:/data
       # Docker socket is mounted READ-WRITE so restart/stop actions work.
