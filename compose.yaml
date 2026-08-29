@@ -21,6 +21,11 @@ services:
       #   PULSE_TRAKT_CLIENT_ID=...
       #   PULSE_TRAKT_CLIENT_SECRET=...
       # Unset is fine — the Trakt spoke stays inert and ingest still runs.
+      # Host-based surface split. Set this to the PUBLIC hostname (the one reachable from
+      # outside the LAN). Requests arriving on it are restricted to the consumer app; the whole
+      # admin surface returns a plain 404 there. The internal/admin hostname is unaffected.
+      # Leave unset for a LAN-only deployment.
+      - PULSE_PUBLIC_HOST=${PULSE_PUBLIC_HOST:-}
       - PULSE_TRAKT_CLIENT_ID=${PULSE_TRAKT_CLIENT_ID:-}
       - PULSE_TRAKT_CLIENT_SECRET=${PULSE_TRAKT_CLIENT_SECRET:-}
     volumes:
