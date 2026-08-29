@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { openDb, migrate, type DB } from '../db';
-import { addWatchlist, listWatchlist, removeWatchlist, markOnServer, listPendingNotify } from './watchlist';
+import { addWatchlist, importWatchlist, listWatchlist, removeWatchlist, markOnServer, listPendingNotify } from './watchlist';
 
 let db: DB;
 beforeEach(() => { db = openDb(':memory:'); migrate(db); });
@@ -43,4 +43,20 @@ it('listPendingNotify returns distinct not-on-server flagged rows across consume
   addWatchlist(db, { consumerId: 1, tmdbId: 8, mediaType: 'movie', title: 'Z', onServer: false, notifyOnAvailable: false });
   const pending = listPendingNotify(db);
   expect(pending).toEqual([{ tmdbId: 100, mediaType: 'tv' }]);
+});
+
+it('importWatchlist never overwrites a row pulse already owns', () => {
+  addWatchlist(db, { consumerId: 1, tmdbId: 100, mediaType: 'tv', title: 'Spider-Noir', onServer: true, notifyOnAvailable: true });
+  importWatchlist(db, { consumerId: 1, tmdbId: 100, mediaType: 'tv', title: 'Spider Noir', onServer: false });
+  const rows = listWatchlist(db, 1);
+  expect(rows).toHaveLength(1);
+  // on_server survives: resetting it to 0 would re-arm the availability notify for a title the
+  // viewer was already told about and already has.
+  expect(rows[0]).toMatchObject({ onServer: true, notifyOnAvailable: true, title: 'Spider-Noir' });
+});
+
+it('importWatchlist creates the row with the notify flag OFF', () => {
+  importWatchlist(db, { consumerId: 1, tmdbId: 100, mediaType: 'tv', title: 'Spider-Noir', onServer: false });
+  expect(listWatchlist(db, 1)[0]).toMatchObject({ tmdbId: 100, notifyOnAvailable: false });
+  expect(listPendingNotify(db)).toEqual([]);
 });

@@ -589,5 +589,17 @@
     "linked": "Conectado",
     "expired": "O código expirou. Tente de novo.",
     "notConfigured": "O Trakt não está configurado neste servidor."
+  },
+  "stremio": {
+    "title": "Stremio",
+    "description": "Sua lista aparece na Biblioteca do Stremio, neste computador e na TV.",
+    "email": "E-mail do Stremio",
+    "password": "Senha do Stremio",
+    "connect": "Conectar Stremio",
+    "disconnect": "Desconectar",
+    "linked": "Conectado",
+    "badCredentials": "O Stremio não aceitou esse e-mail e senha.",
+    "unreachable": "Não deu para falar com o Stremio. Tente de novo em instantes.",
+    "passwordNote": "Sua senha é usada uma vez para entrar e não fica guardada."
   }
 }

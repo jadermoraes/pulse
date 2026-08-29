@@ -274,6 +274,17 @@ export function migrate(db: DB): void {
       runtime_seconds INTEGER,
       cached_at       INTEGER NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS imdb_meta_cache (
+      imdb_id    TEXT NOT NULL,
+      media_type TEXT NOT NULL,
+      tmdb_id    INTEGER,
+      name       TEXT,
+      poster     TEXT,
+      found      INTEGER NOT NULL,
+      cached_at  INTEGER NOT NULL,
+      PRIMARY KEY (imdb_id, media_type)
+    );
+    CREATE INDEX IF NOT EXISTS idx_imdb_meta_tmdb ON imdb_meta_cache(tmdb_id, media_type);
   `);
 
   // Seed the built-in, immutable Admin role exactly once (idempotent: name is UNIQUE).

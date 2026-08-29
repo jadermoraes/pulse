@@ -12,6 +12,7 @@ import { joinUrl, getJsonWithKey } from '../http';
 import { ingestPlays } from '../consumer/plays-ingest';
 import { ingestJellystatPlays } from '../consumer/jellystat-ingest';
 import { pollTraktHistory } from '../consumer/trakt-sync';
+import { pollStremioSync } from '../consumer/stremio-sync';
 
 export interface EventRow {
   id: number; ts: number; source: string; type: string;
@@ -273,6 +274,7 @@ export async function tickPoll(db: DB): Promise<void> {
       await ingestJellystatPlays(db, jellystat, jellyfin).catch(() => { /* best-effort */ });
     }
     await pollWatchlistAvailability(db);
+    await pollStremioSync(db).catch(() => { /* best-effort */ });
     await pollTraktHistory(db).catch(() => { /* best-effort */ });
     pruneEvents(db); // remove read events older than 7 days to keep the table trim
   }

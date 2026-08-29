@@ -24,6 +24,30 @@ export function addWatchlist(db: DB, w: {
   ).run(w.consumerId, w.tmdbId, w.mediaType, w.title, w.onServer ? 1 : 0, w.notifyOnAvailable ? 1 : 0, Date.now());
 }
 
+/**
+ * Insert a title the viewer saved in a SPOKE (Stremio), never touching a row pulse already owns.
+ *
+ * Deliberately not `addWatchlist`: that one is an upsert whose DO UPDATE sets
+ * `on_server=excluded.on_server`, so importing a title pulse already has would reset an
+ * `on_server=1` row back to 0 — and the availability poller would then notify the viewer a
+ * second time for a title they were already told about. The import direction can be driven by a
+ * transient upstream blip (an id that failed to resolve looks "unknown" for one cycle), so it
+ * must be structurally incapable of clobbering local state: ON CONFLICT DO NOTHING.
+ *
+ * `notify_on_available` is 0 by design. A title the viewer saved in Stremio is not a notify
+ * subscription they asked pulse for; on a first link this loop can see a hundred of them, and
+ * notify=1 would fire a push AND a Telegram DM AND a Jellyfin favourite for every one of them.
+ */
+export function importWatchlist(db: DB, w: {
+  consumerId: number; tmdbId: number; mediaType: string; title: string; onServer: boolean;
+}): void {
+  db.prepare(
+    `INSERT INTO consumer_watchlist(consumer_id,tmdb_id,media_type,title,on_server,notify_on_available,added_at)
+     VALUES (?,?,?,?,?,0,?)
+     ON CONFLICT(consumer_id,tmdb_id,media_type) DO NOTHING`
+  ).run(w.consumerId, w.tmdbId, w.mediaType, w.title, w.onServer ? 1 : 0, Date.now());
+}
+
 export function listWatchlist(db: DB, consumerId: number): WatchlistRow[] {
   return (db.prepare('SELECT * FROM consumer_watchlist WHERE consumer_id=? ORDER BY added_at DESC')
     .all(consumerId) as any[]).map(rowOf);
