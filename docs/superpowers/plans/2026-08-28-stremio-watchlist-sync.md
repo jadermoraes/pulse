@@ -467,7 +467,11 @@ git commit -m "feat(stremio): datastore client (login, get, put) with fail-close
 **Interfaces:**
 - Consumes: `stremioLogin` (Task 2); `saveCredential`, `getCredential`, `deleteCredential` from `src/lib/server/consumer/spoke-credentials.ts` (`SpokeId` already includes `'stremio'`); `rateLimit` from `src/lib/server/request-limit.ts`; the capability helper in `src/lib/server/identity/capabilities.ts`.
 
-**Before writing this file, read `src/lib/server/identity/capabilities.ts` and `src/lib/server/request-limit.ts` and use their ACTUAL exported names and signatures.** The snippet below assumes `hasCapability(db, consumerId, 'watchlist')` and `rateLimit(key, max, windowMs)`; if either differs, match what is there rather than adding a new helper. Add a test that a consumer lacking the `watchlist` capability gets 403.
+These signatures are **verified against the codebase** — use them as written:
+- `effectiveAllowList(user, role): Capability[]` from `src/lib/server/identity/consumers.ts:78` (a per-user `allowOverride` wins, else `role.allowList`), combined with `getConsumer` and `getRole` — this is exactly how `src/routes/api/app/me/+server.ts:20` resolves capabilities. There is **no** `hasCapability` helper; do not invent one.
+- `rateLimit(key, max, windowMs, now?)` from `src/lib/server/request-limit.ts:6` **returns `{ ok, retryAfter }` and does not throw** — you must check `.ok`.
+
+Add two tests: a consumer lacking the `watchlist` capability gets 403, and a sixth link attempt inside the window gets 429. Import `__resetRequestLimitState` from `request-limit.ts` in `beforeEach` so the in-memory window does not leak between tests.
 - Produces: `GET /api/app/stremio` (status), `POST /api/app/stremio` (`{ email, password }` → link), `DELETE /api/app/stremio` (unlink).
 
 - [ ] **Step 1: Write the failing test**
@@ -557,7 +561,8 @@ import { stremioLogin, StremioError } from '$lib/server/integrations/stremio';
 import { saveCredential, getCredential, deleteCredential } from '$lib/server/consumer/spoke-credentials';
 import { logAccess } from '$lib/server/identity/access-log';
 import { rateLimit } from '$lib/server/request-limit';
-import { hasCapability } from '$lib/server/identity/capabilities';
+import { getConsumer, effectiveAllowList } from '$lib/server/identity/consumers';
+import { getRole } from '$lib/server/identity/roles';
 
 export const GET: RequestHandler = async ({ locals }) => {
   if (!locals.consumer) throw error(401, 'Unauthorized');
@@ -573,10 +578,18 @@ export const GET: RequestHandler = async ({ locals }) => {
 export const POST: RequestHandler = async ({ locals, request, getClientAddress }) => {
   if (!locals.consumer) throw error(401, 'Unauthorized');
   // Spec: gated on the EXISTING `watchlist` capability — Stremio sync is a watchlist feature,
-  // so it does not widen the Capability union or the roles UI.
-  if (!hasCapability(getDb(), locals.consumer.id, 'watchlist')) throw error(403, 'Forbidden');
-  // A login endpoint that takes a password must not be free to hammer.
-  rateLimit(`stremio-link:${locals.consumer.id}`, 5, 60_000);
+  // so it does not widen the Capability union or the roles UI. This is the same resolution
+  // `/api/app/me` uses: a per-user override wins, else the role's allow-list.
+  const db = getDb();
+  const c = getConsumer(db, locals.consumer.id);
+  if (!c) throw error(401, 'Unauthorized');
+  const role = getRole(db, c.roleId)!;
+  if (!effectiveAllowList(c, role).includes('watchlist')) throw error(403, 'Forbidden');
+
+  // A login endpoint that takes a password must not be free to hammer. `rateLimit` RETURNS a
+  // result, it does not throw.
+  const limit = rateLimit(`stremio-link:${locals.consumer.id}`, 5, 60_000);
+  if (!limit.ok) throw error(429, `Too many attempts. Try again in ${limit.retryAfter}s.`);
   const body = await request.json().catch(() => ({}));
   const email = typeof body?.email === 'string' ? body.email.trim() : '';
   const password = typeof body?.password === 'string' ? body.password : '';
@@ -858,7 +871,7 @@ git commit -m "feat(stremio): pure reconciler with the pulse-origin removal guar
 **Interfaces:**
 - Consumes: `reconcile`, `PulseItem`, `StremioItem`, `stremioType` (Task 4); `datastoreGet`, `datastorePut`, `StremioLibraryItem`, `StremioError` (Task 2); `resolveImdbMeta` (Task 1); `listEnabled`, `recordSuccess`, `recordFailure`, `recordNote` from `spoke-credentials.ts`; `listWatchlist` from `watchlist.ts`; `getJsonWithKey`, `joinUrl` from `../http`; `listConnections` from `../connections`.
 - Produces:
-  - `loadPulseItems(db: DB, consumerId: number, seerr: Connection | null): Promise<PulseItem[]>`
+  - `loadPulseItems(db: DB, consumerId: number, seerr: Connection | null): Promise<PulseItem[]>` — the UNION of watchlist rows and not-yet-available `consumer_requests`, deduped on `(tmdbId, mediaType)`
   - `buildLibraryItem(p: PulseItem, template: StremioLibraryItem | null, meta: { name: string; poster: string | null } | null): StremioLibraryItem`
   - `pollStremioSync(db: DB): Promise<void>`
 
@@ -933,6 +946,28 @@ it('pushes a wanted title into an empty stremio library', async () => {
   expect(getCredential(db, consumerId, 'stremio')?.lastSyncAt).not.toBeNull();
 });
 
+it('pushes an in-flight request that is not on the watchlist', async () => {
+  db.prepare(
+    `INSERT INTO consumer_requests(consumer_id,tmdb_id,media_type,title,status,created_at)
+     VALUES (?,278,'movie','Shawshank','pending',?)`
+  ).run(consumerId, Date.now());
+  db.prepare(
+    `INSERT INTO imdb_meta_cache(imdb_id,media_type,tmdb_id,name,poster,found,cached_at)
+     VALUES ('tt0111161','movie',278,'Shawshank',NULL,1,?)`
+  ).run(Date.now());
+
+  let putBody: any = null;
+  global.fetch = (vi.fn(async (url: any, init: any) => {
+    if (String(url).endsWith('/datastoreGet')) return new Response(JSON.stringify({ result: [] }), { status: 200 });
+    putBody = JSON.parse(init.body);
+    return new Response(JSON.stringify({ result: {} }), { status: 200 });
+  }) as any);
+
+  saveCredential(db, { consumerId, spoke: 'stremio', secret: 'ak' });
+  await pollStremioSync(db);
+  expect(putBody.changes.map((c: any) => c._id)).toEqual(['tt0111161']);
+});
+
 it('a failing spoke records the failure and never throws', async () => {
   addWatchlist(db, { consumerId, tmdbId: 278, mediaType: 'movie', title: 'S', onServer: false, notifyOnAvailable: true });
   global.fetch = (vi.fn(async () => new Response('nope', { status: 500 })) as any);
@@ -998,10 +1033,30 @@ async function imdbForTmdb(
   }
 }
 
+/**
+ * Spec: the Library shows "wanted + in-flight, drop when available". So the push set is the
+ * UNION of watchlist rows and the viewer's requests that have not landed yet, deduplicated on
+ * (tmdbId, mediaType) with the watchlist row winning (it carries on_server).
+ */
+function inFlightRequests(db: DB, consumerId: number): Array<{ tmdbId: number; mediaType: string; title: string }> {
+  return db.prepare(
+    `SELECT tmdb_id AS tmdbId, media_type AS mediaType, title
+       FROM consumer_requests
+      WHERE consumer_id=? AND status <> 'available'`
+  ).all(consumerId) as any[];
+}
+
 export async function loadPulseItems(
   db: DB, consumerId: number, seerr: Connection | null
 ): Promise<PulseItem[]> {
-  const rows = listWatchlist(db, consumerId);
+  const watchlist = listWatchlist(db, consumerId);
+  const seen = new Set(watchlist.map((r) => `${r.tmdbId}:${r.mediaType === 'tv' ? 'tv' : 'movie'}`));
+  const rows: Array<{ tmdbId: number; mediaType: string; title: string; onServer: boolean }> = [
+    ...watchlist.map((r) => ({ tmdbId: r.tmdbId, mediaType: r.mediaType, title: r.title, onServer: r.onServer })),
+    ...inFlightRequests(db, consumerId)
+      .filter((q) => !seen.has(`${q.tmdbId}:${q.mediaType === 'tv' ? 'tv' : 'movie'}`))
+      .map((q) => ({ tmdbId: q.tmdbId, mediaType: q.mediaType, title: q.title, onServer: false }))
+  ];
   const out: PulseItem[] = [];
   for (const r of rows) {
     const mediaType = r.mediaType === 'tv' ? 'tv' : 'movie';
