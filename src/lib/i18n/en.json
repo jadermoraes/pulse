@@ -415,6 +415,7 @@
     "bindTelegram": "Connect Telegram",
     "comingSoon": "coming soon",
     "connectTelegram": "Connect Telegram",
+    "connections": "Connections",
     "telegramHint": "Get instant alerts and chat with Pulse in Telegram.",
     "telegramConnected": "Telegram connected",
     "disconnect": "Disconnect",
