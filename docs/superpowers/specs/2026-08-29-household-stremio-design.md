@@ -41,12 +41,39 @@ convenient:
 | A participant adds a title in pulse | It appears in the household Library |
 | A title is saved on the TV | It is added to **every** participant's watchlist |
 | A title is removed on the TV | It is removed from **every** participant's watchlist |
-| A participant removes a title in pulse | It leaves the shared list, so it leaves the TV |
+| A participant removes a title in pulse | It leaves the shared list once **no** participant still wants it — but see the correction below: it does **not** leave the TV |
 | A title lands on the media server | It leaves the Library (unchanged "drop when available") |
 
-Without the fan-out on removal, one participant deleting a title would leave the others still
-pushing it, and it would reappear on the TV — the ping-pong the reconciler's guard exists to
-prevent, re-introduced at a higher level. Fanning out removals is what earns the word "shared".
+The fan-out that matters is the **inbound** one. A removal on the TV must reach every
+participant's watchlist; without it the participants who still hold the row keep pushing the title
+back and it reappears on the TV — the ping-pong the reconciler's guard exists to prevent,
+re-introduced at a higher level. Fanning out inbound removals is what earns the word "shared".
+
+The outbound direction needs no fan-out, and must not have one. The shared list is a union, so a
+participant removing a title in pulse simply stops contributing it; the title leaves the TV when
+the last contributor drops it. Deleting the other participants' rows on one person's say-so would
+destroy data pulse was never asked to touch, and the union already makes the outbound direction
+stable on its own: a title one person still wants is still wanted.
+
+## Correction (2026-08-30): outbound removal never worked
+
+The table above claims a pulse-side removal reaches the TV. It does not, and did not in the
+per-viewer design either. `reconcile` decides imports with
+`stremioItems.filter((s) => !s.removed && !knownImdb.has(s.imdbId))`, so a title removed from every
+participant's watchlist is, by the next poll, present in Stremio and unknown to pulse — which is
+exactly the import condition. It is re-imported within one cycle. No code path pushes
+`removed: true` because a participant dropped a title in pulse.
+
+Neither task review nor the whole-branch review caught it, because every test drives removal from
+the Stremio side, which does work.
+
+The union reasoning in this document is unaffected and stands: it governs when a title leaves the
+shared *list*, and that part is correct. What was wrong was the claim that leaving the list
+propagates outward to Stremio.
+
+Fixed by `2026-08-30-watchlist-screen-and-household-removal.md`, which adds a transient
+`household_removals` queue: the removal is pushed as `removed: true`, and the queued ids are
+excluded from the list handed to the reconciler until that write lands.
 
 ## What carries over unchanged
 
@@ -71,15 +98,32 @@ because they operate on two lists and nothing else:
    and that a title is `onServer` only when every contributing row says so.
 3. **Write-back fans out.** Imports and hand-removals apply to every participant, inside one
    transaction so a partial fan-out cannot leave participants disagreeing.
-4. **`sync_state` scope.** Provenance is now per household, not per consumer. Use a reserved
-   `consumer_id` of `0` for the household row, or add a nullable column — whichever avoids a
-   migration, since `migrate()` has no `ALTER` path.
+4. **`sync_state` scope.** Provenance is now per household, not per consumer — so it moves to a
+   **new `household_sync_state` table**, keyed `(spoke, entity, tmdb_id, media_type)` with no
+   `consumer_id` column at all.
+
+   Two alternatives were considered first and both are unusable. A reserved `consumer_id = 0`
+   violates `sync_state`'s `REFERENCES consumer_users(id)`, and `foreign_keys` is `ON`, so the
+   insert throws. Adding a nullable column needs an `ALTER`, and `migrate()` is `CREATE TABLE IF
+   NOT EXISTS` only — the new column would appear on fresh databases and never on the live one.
+   A brand-new table is the one shape that works on both, with no migration and no `ALTER`.
 5. **Consumer UI.** The Stremio panel leaves the account page; Trakt's stays. The `stremio.*`
    strings move to the admin surface.
-6. **Admin UI.** A `stremio` integration registered in the existing registry. Its `configSchema`
-   needs a field type the current `ConfigField` union lacks — a consumer multi-select for
-   `participantIds`. That is a small, contained extension (`type: 'consumers'`), rendered by the
-   settings page.
+6. **Admin UI.** A bespoke Stremio panel in the Connections tab, backed by an admin
+   `/api/stremio` endpoint — the same shape the roles, users and AI-connection panels on that page
+   already use. `ConfigField` is left untouched.
+
+   Registering a `stremio` Integration instead was the first plan and does not work. The generic
+   connection form is built around `baseUrl` + `secret`: `?/create` rejects a blank `baseUrl`, and
+   the `secret` it stores is whatever was typed into the password box — which for Stremio is the
+   **password**, breaking this design's own "the password is never stored" rule. There is no hook
+   in the `Integration` contract to exchange it for an authKey. Bending the shared form around one
+   integration risks the nine that already depend on it, for no user-visible difference: the panel
+   lands in the same tab either way.
+
+   The connection row still carries a real `baseUrl` (`https://api.strem.io`) rather than an empty
+   string, because `config.ts`'s import validator rejects a connection whose `baseUrl` is empty —
+   an exported config would fail to re-import.
 
 ## Migration
 

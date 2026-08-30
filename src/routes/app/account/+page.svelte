@@ -128,62 +128,6 @@
     finally { telegramBusy = false; }
   }
 
-  // Stremio link state
-  let stremioLinked = $state(false);
-  let stremioLastError = $state<string | null>(null);
-  let stremioEmail = $state('');
-  let stremioPassword = $state('');
-  let stremioBusy = $state(false);
-  let stremioErr = $state<string | null>(null);
-
-  async function loadStremio() {
-    try {
-      const r = await fetch('/api/app/stremio').then((x) => x.json());
-      stremioLinked = r.linked ?? false;
-      stremioLastError = r.lastError ?? null;
-    } catch { /* ignore */ }
-  }
-
-  async function connectStremio() {
-    stremioErr = null;
-    stremioBusy = true;
-    const email = stremioEmail;
-    const password = stremioPassword;
-    // The password only ever needs to live long enough to build this one request body — clear
-    // it from state immediately rather than holding it for the lifetime of the request.
-    stremioPassword = '';
-    try {
-      const res = await fetch('/api/app/stremio', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password })
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        stremioErr =
-          res.status === 400 ? $_('stremio.badCredentials')
-          : res.status === 502 ? $_('stremio.unreachable')
-          : (body.message ?? $_('stremio.unreachable'));
-        return;
-      }
-      stremioEmail = '';
-      await loadStremio();
-    } catch (e) {
-      stremioErr = (e as Error).message || $_('stremio.unreachable');
-    } finally {
-      stremioBusy = false;
-    }
-  }
-
-  async function disconnectStremio() {
-    stremioBusy = true;
-    try {
-      await fetch('/api/app/stremio', { method: 'DELETE' });
-      await loadStremio();
-    } catch { /* ignore */ }
-    finally { stremioBusy = false; }
-  }
-
   // Trakt link state
   let traktConfigured = $state(false);
   let traktLinked = $state(false);
@@ -284,7 +228,7 @@
   }
 
   const pct = $derived(me && me.cap ? Math.min(100, Math.round((me.monthToDate / me.cap) * 100)) : 0);
-  onMount(async () => { await load(); await loadTelegram(); await loadStremio(); await loadTrakt(); });
+  onMount(async () => { await load(); await loadTelegram(); await loadTrakt(); });
   $effect(() => () => { stopPolling(); stopTraktPolling(); });
 </script>
 
@@ -355,24 +299,6 @@
       <h2>{$_('app.connections')}</h2>
 
       <div class="conn-block">
-        <h3>{$_('stremio.title')}</h3>
-        <p class="app-hint">{$_('stremio.description')}</p>
-        {#if stremioLinked}
-          <span class="badge badge-ok">{$_('stremio.linked')}</span>
-          <button class="btn btn-s" onclick={disconnectStremio} disabled={stremioBusy}>{$_('app.disconnect')}</button>
-          {#if stremioLastError}<p class="app-error">{stremioLastError}</p>{/if}
-        {:else}
-          <form onsubmit={(e) => { e.preventDefault(); connectStremio(); }}>
-            <label>{$_('stremio.email')}<input type="email" bind:value={stremioEmail} autocomplete="email" required /></label>
-            <label>{$_('stremio.password')}<input type="password" bind:value={stremioPassword} autocomplete="current-password" required /></label>
-            <p class="app-hint">{$_('stremio.passwordNote')}</p>
-            <button class="btn btn-s" disabled={stremioBusy || !stremioEmail || !stremioPassword}>{$_('stremio.connect')}</button>
-          </form>
-        {/if}
-        {#if stremioErr}<p class="app-error">{stremioErr}</p>{/if}
-      </div>
-
-      <div class="conn-block">
         <h3>{$_('trakt.title')}</h3>
         <p class="app-hint">{$_('trakt.description')}</p>
         {#if !traktConfigured}
@@ -436,9 +362,6 @@
   .conn-block h3 {
     font-size: 14px;
     font-weight: 600;
-  }
-  .conn-block form {
-    width: 100%;
   }
   .conn-code {
     font-size: 22px;

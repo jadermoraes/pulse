@@ -13,7 +13,8 @@ import { SEERR_PATHS } from '../consumer/types';
 import { scrub } from './scrub';
 import { connectionApiRequest } from './api-passthrough';
 import { getConsumer } from '../identity/consumers';
-import { addWatchlist, listWatchlist, removeWatchlist } from '../consumer/watchlist';
+import { addWatchlist, listWatchlist } from '../consumer/watchlist';
+import { removeWatchlistEverywhere } from '../consumer/watchlist-remove';
 import { listMyRequests, cancelMyRequest } from '../consumer/my-requests';
 import { mirrorFavorite } from '../consumer/jellyfin-favorite';
 import { submitConsumerMessage } from '../consumer/submit-message';
@@ -336,13 +337,14 @@ export async function buildToolSpecs(ctx: AgentContext): Promise<ToolSpec[]> {
     });
     specs.push({
       name: 'watchlistRemove', risk: 'write', category: 'requests',
-      description: 'Remove a title from the viewer\'s watchlist. Args: { tmdbId, mediaType }.',
+      description: 'Remove a title from the watchlist. On a household Stremio setup this removes it for EVERY participant and takes it off the shared Library. Args: { tmdbId, mediaType }.',
       async run(ctx, args) {
         const tmdbId = Number(args.tmdbId);
         const mediaType = args.mediaType === 'tv' ? 'tv' : 'movie';
-        const removed = removeWatchlist(ctx.db, consumerId, tmdbId, mediaType);
-        if (removed?.jellyfinItemId) await mirrorFavorite(ctx.db, consumerId, tmdbId, mediaType, false);
-        return scrub({ ok: !!removed });
+        // Shared with the REST endpoint: household-aware, and queues the Stremio tombstone so the
+        // title is not re-imported on the next poll.
+        const r = await removeWatchlistEverywhere(ctx.db, { actorId: consumerId, tmdbId, mediaType });
+        return scrub({ ok: r.removed, household: r.household });
       }
     });
     specs.push({

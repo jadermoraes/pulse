@@ -10,6 +10,60 @@
   // Lazily-fetched poster/watch detail, keyed by `${mediaType}:${tmdbId}`.
   let details = $state<Record<string, DiscoverDetail>>({});
 
+  type WatchlistRow = {
+    id: number; tmdbId: number; mediaType: string; title: string;
+    onServer: boolean; notifyOnAvailable: boolean; addedAt: number;
+  };
+
+  let view = $state<'requests' | 'watchlist'>('requests');
+  let watchlist = $state<WatchlistRow[] | null>(null);
+  let confirmingId = $state<number | null>(null);
+  let removeErr = $state<string | null>(null);
+  let watchlistErr = $state<string | null>(null);
+
+  async function loadWatchlist() {
+    watchlistErr = null;
+    try {
+      const r = await fetch('/api/app/watchlist');
+      if (r.status === 401) { await goto('/app/login'); return; }
+      // A 403 is a settled answer (the role lacks the `watchlist` capability), so it renders as an
+      // empty list WITH an explanation — silently showing "Nothing saved yet." reads as a bug.
+      if (r.status === 403) { watchlist = []; watchlistErr = $_('app.watchlistNoAccess'); return; }
+      if (!r.ok) {
+        // Leave it null, NOT [] — `showView` only refetches when it is null, so an empty array
+        // would strand the tab permanently empty after one transient failure.
+        watchlist = null;
+        watchlistErr = $_('app.watchlistLoadFailed');
+        return;
+      }
+      // The server already orders newest-first; never re-sort here.
+      watchlist = await r.json();
+      void hydrateAll(watchlist ?? []);
+    } catch {
+      watchlist = null;
+      watchlistErr = $_('app.watchlistLoadFailed');
+    }
+  }
+
+  async function removeFromWatchlist(w: WatchlistRow) {
+    removeErr = null;
+    const res = await fetch('/api/app/watchlist', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tmdbId: w.tmdbId, mediaType: w.mediaType })
+    });
+    // `{ ok: false }` on a 200 just means the title was already gone — reloading renders either.
+    if (!res.ok) { removeErr = $_('app.watchlistRemoveFailed'); return; }
+    confirmingId = null;
+    await loadWatchlist();
+  }
+
+  function showView(v: 'requests' | 'watchlist') {
+    view = v;
+    confirmingId = null;
+    if (v === 'watchlist' && watchlist === null) void loadWatchlist();
+  }
+
   async function load() {
     const r = await fetch('/api/app/requests');
     if (r.status === 401) { await goto('/app/login'); return; }
@@ -18,7 +72,21 @@
     for (const req of requests ?? []) hydrate(req);
   }
 
-  async function hydrate(req: ConsumerRequest) {
+  // Both views hydrate posters, so these two take the structural shape rather than a request.
+  type Hydratable = { tmdbId: number; mediaType: string };
+
+  /** Hydrate posters a few at a time. ~70 watchlist rows would otherwise fire ~70 parallel
+   *  /api/app/detail calls, each hitting Seerr/TMDB with no cache in front of it — from a phone
+   *  they queue behind ~6 sockets and every one of them re-reads `getConsumer`. */
+  async function hydrateAll(rows: Hydratable[]) {
+    const queue = [...rows];
+    const workers = Array.from({ length: 4 }, async () => {
+      for (let next = queue.shift(); next; next = queue.shift()) await hydrate(next);
+    });
+    await Promise.all(workers);
+  }
+
+  async function hydrate(req: Hydratable) {
     const key = `${req.mediaType}:${req.tmdbId}`;
     if (details[key]) return;
     try {
@@ -27,7 +95,7 @@
     } catch { /* leave fallback */ }
   }
 
-  function detailFor(req: ConsumerRequest): DiscoverDetail | undefined {
+  function detailFor(req: Hydratable): DiscoverDetail | undefined {
     return details[`${req.mediaType}:${req.tmdbId}`];
   }
 
@@ -68,49 +136,109 @@
   onMount(load);
 </script>
 
-<svelte:head><title>My Requests · Pulse</title></svelte:head>
+<svelte:head><title>{view === 'watchlist' ? $_('app.watchlistTitle') : $_('app.requestsTitle')} · Pulse</title></svelte:head>
 
 <div class="page">
-  <h1>{$_('app.requestsTitle')}</h1>
+  <div class="tabs" role="tablist">
+    <button role="tab" class="tab" class:on={view === 'requests'}
+      aria-selected={view === 'requests'} onclick={() => showView('requests')}
+    >{$_('app.navRequestsTab')}</button>
+    <button role="tab" class="tab" class:on={view === 'watchlist'}
+      aria-selected={view === 'watchlist'} onclick={() => showView('watchlist')}
+    >{$_('app.navWatchlistTab')}</button>
+  </div>
 
-  {#if requests && requests.length}
-    <ul class="cards">
-      {#each requests as r (r.id)}
-        {@const d = detailFor(r)}
-        {@const b = badge(r.status)}
-        <li class="card" data-status={r.status}>
-          <button class="card-btn" type="button" onclick={() => open(r)} onkeydown={(e) => onKey(e, r)}>
-            <span class="poster">
-              {#if d?.poster}
-                <img src={d.poster} alt={r.title} loading="lazy" />
-              {:else}
-                <span class="poster-fallback" aria-hidden="true">
-                  {r.mediaType === 'tv' ? $_('app.tagSeries') : $_('app.tagMovie')}
+  {#if view === 'requests'}
+    {#if requests && requests.length}
+      <ul class="cards">
+        {#each requests as r (r.id)}
+          {@const d = detailFor(r)}
+          {@const b = badge(r.status)}
+          <li class="card" data-status={r.status}>
+            <button class="card-btn" type="button" onclick={() => open(r)} onkeydown={(e) => onKey(e, r)}>
+              <span class="poster">
+                {#if d?.poster}
+                  <img src={d.poster} alt={r.title} loading="lazy" />
+                {:else}
+                  <span class="poster-fallback" aria-hidden="true">
+                    {r.mediaType === 'tv' ? $_('app.tagSeries') : $_('app.tagMovie')}
+                  </span>
+                {/if}
+              </span>
+              <span class="meta">
+                <span class="title">{r.title}</span>
+                {#if d?.year}<span class="year">{d.year}</span>{/if}
+                <span class="badge" data-tone={b.tone}>{$_(b.key)}</span>
+              </span>
+            </button>
+            {#if r.status === 'available' && d?.watchUrl}
+              <a
+                class="watch"
+                href={d.watchUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+              >{$_('app.watch')}</a>
+            {/if}
+          </li>
+        {/each}
+      </ul>
+    {:else if requests}
+      <div class="empty">
+        <p class="empty-title">{$_('app.requestsEmptyTitle')}</p>
+        <a class="empty-cta" href="/app/discover">{$_('app.requestsEmptyCta')} ▸</a>
+      </div>
+    {/if}
+  {:else}
+    <p class="shared-note">{$_('app.watchlistSharedNote')}</p>
+    {#if removeErr}<p class="err">{removeErr}</p>{/if}
+    {#if watchlistErr}<p class="err">{watchlistErr}</p>{/if}
+    {#if watchlist && watchlist.length}
+      <ul class="cards">
+        {#each watchlist as w (w.id)}
+          {@const d = detailFor(w)}
+          <li class="card">
+            <button class="card-btn" type="button" onclick={() => (selected = {
+              source: 'seerr', title: w.title, year: d?.year, poster: d?.poster,
+              tmdbId: w.tmdbId, mediaType: w.mediaType, onServer: w.onServer,
+              watchUrl: d?.watchUrl, released: true, requested: false
+            } as DiscoverItem)}>
+              <span class="poster">
+                {#if d?.poster}
+                  <img src={d.poster} alt={w.title} loading="lazy" />
+                {:else}
+                  <span class="poster-fallback" aria-hidden="true">
+                    {w.mediaType === 'tv' ? $_('app.tagSeries') : $_('app.tagMovie')}
+                  </span>
+                {/if}
+              </span>
+              <span class="meta">
+                <span class="title">{w.title}</span>
+                {#if d?.year}<span class="year">{d.year}</span>{/if}
+                <span class="badge" data-tone={w.onServer ? 'available' : 'pending'}>
+                  {w.onServer ? $_('app.watchlistOnServer') : $_('app.watchlistWanted')}
                 </span>
-              {/if}
-            </span>
-            <span class="meta">
-              <span class="title">{r.title}</span>
-              {#if d?.year}<span class="year">{d.year}</span>{/if}
-              <span class="badge" data-tone={b.tone}>{$_(b.key)}</span>
-            </span>
-          </button>
-          {#if r.status === 'available' && d?.watchUrl}
-            <a
-              class="watch"
-              href={d.watchUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-            >{$_('app.watch')}</a>
-          {/if}
-        </li>
-      {/each}
-    </ul>
-  {:else if requests}
-    <div class="empty">
-      <p class="empty-title">{$_('app.requestsEmptyTitle')}</p>
-      <a class="empty-cta" href="/app/discover">{$_('app.requestsEmptyCta')} ▸</a>
-    </div>
+              </span>
+            </button>
+            {#if confirmingId === w.id}
+              <button class="rm confirm" type="button" onclick={() => removeFromWatchlist(w)}
+              >{$_('app.watchlistRemoveConfirm')}</button>
+              <button class="rm" type="button" onclick={() => (confirmingId = null)}
+              >{$_('app.watchlistRemoveCancel')}</button>
+            {:else}
+              <button class="rm" type="button" onclick={() => (confirmingId = w.id)}
+              >{$_('app.watchlistRemove')}</button>
+            {/if}
+          </li>
+        {/each}
+      </ul>
+    {:else if watchlist}
+      <div class="empty">
+        <p class="empty-title">{$_('app.watchlistEmptyTitle')}</p>
+        <a class="empty-cta" href="/app/discover">{$_('app.watchlistEmptyCta')} ▸</a>
+      </div>
+    {:else if !watchlistErr}
+      <div class="empty"><p class="empty-title">{$_('app.watchlistLoading')}</p></div>
+    {/if}
   {/if}
 
   <MovieModal item={selected} onClose={() => (selected = null)} onRequested={load} />
@@ -118,7 +246,6 @@
 
 <style>
   .page { padding: 1.1rem 1rem 1.5rem; max-width: 720px; margin: 0 auto; width: 100%; }
-  h1 { font-size: 1.4rem; font-weight: 700; letter-spacing: -0.3px; margin: 0 0 1.1rem; }
 
   .cards { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.7rem; }
   .card {
@@ -257,4 +384,26 @@
     border: 1px solid color-mix(in srgb, var(--accent, #28e0a0) 28%, transparent);
   }
   .empty-cta:hover { background: color-mix(in srgb, var(--accent, #28e0a0) 20%, transparent); }
+
+  .tabs { display: flex; gap: 0.4rem; margin: 0 0 1.1rem; }
+  .tab {
+    flex: 1; padding: 0.55rem 0.8rem; border-radius: 12px; font-size: 0.9rem; font-weight: 600;
+    background: var(--card, rgba(255, 255, 255, 0.04));
+    border: 1px solid var(--card-brd, rgba(255, 255, 255, 0.08));
+    color: var(--sub, #9aa4b2); cursor: pointer;
+  }
+  .tab.on {
+    color: #08110d;
+    background: linear-gradient(135deg, var(--accent, #28e0a0), var(--accent2, #36c6ff));
+    border-color: transparent;
+  }
+  .shared-note { font-size: 0.78rem; color: var(--sub, #9aa4b2); margin: 0 0 0.9rem; line-height: 1.45; }
+  .err { font-size: 0.82rem; color: #ff7a92; margin: 0 0 0.7rem; }
+  .rm {
+    flex-shrink: 0; padding: 0.4rem 0.7rem; border-radius: 10px; font-size: 0.78rem;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid var(--card-brd, rgba(255, 255, 255, 0.08));
+    color: var(--sub, #9aa4b2); cursor: pointer;
+  }
+  .rm.confirm { color: #ff7a92; border-color: color-mix(in srgb, #ff7a92 40%, transparent); }
 </style>

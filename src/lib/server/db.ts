@@ -252,6 +252,48 @@ export function migrate(db: DB): void {
       dropped_at   INTEGER,
       PRIMARY KEY (consumer_id, spoke, entity, tmdb_id, media_type)
     );
+    -- Stremio is a HOUSEHOLD spoke: one account on one TV, shared by several pulse consumers.
+    -- Its provenance therefore has no consumer to key on. It cannot live in \`sync_state\`:
+    -- that table's consumer_id REFERENCES consumer_users(id) with foreign_keys=ON, so a
+    -- reserved id like 0 throws; and adding a nullable column would need an ALTER, which
+    -- migrate() deliberately does not do. A separate table is the only shape that works on
+    -- both a fresh and an existing database.
+    CREATE TABLE IF NOT EXISTS household_sync_state (
+      spoke        TEXT NOT NULL,
+      entity       TEXT NOT NULL,
+      tmdb_id      INTEGER NOT NULL,
+      media_type   TEXT NOT NULL,
+      synced_at    INTEGER,
+      dropped_at   INTEGER,
+      PRIMARY KEY (spoke, entity, tmdb_id, media_type)
+    );
+    -- Transient work queue: a title a participant removed in pulse, which still has to be
+    -- tombstoned in the Stremio Library. It is NOT a permanent tombstone. Deleting the pulse
+    -- rows alone is exactly the state the reconciler reads as "present in Stremio, unknown to
+    -- pulse, import it", so the title would come straight back. Rows live only until the
+    -- removed=true write lands; after that Stremio's own removed flag keeps the title out, and
+    -- re-saving it on the TV imports it again as normal.
+    CREATE TABLE IF NOT EXISTS household_removals (
+      spoke       TEXT NOT NULL,
+      tmdb_id     INTEGER NOT NULL,
+      media_type  TEXT NOT NULL,
+      imdb_id     TEXT,
+      removed_at  INTEGER NOT NULL,
+      PRIMARY KEY (spoke, tmdb_id, media_type)
+    );
+    -- Bearer token for the inbound Stremio ADDON (catalog + playback + request). Unrelated to the
+    -- outbound Library sync, whose credential lives in \`connections\`. It sits in a URL path, so it
+    -- is a bearer credential: it grants read of the whole library catalogue, streaming of any item,
+    -- and requesting as one consumer. ON DELETE CASCADE means deleting that consumer revokes the
+    -- addon, which is the correct failure direction.
+    CREATE TABLE IF NOT EXISTS addon_tokens (
+      token        TEXT PRIMARY KEY,
+      consumer_id  INTEGER NOT NULL REFERENCES consumer_users(id) ON DELETE CASCADE,
+      label        TEXT,
+      created_at   INTEGER NOT NULL,
+      last_used_at INTEGER,
+      revoked_at   INTEGER
+    );
     CREATE TABLE IF NOT EXISTS consumer_ratings (
       consumer_id  INTEGER NOT NULL REFERENCES consumer_users(id) ON DELETE CASCADE,
       tmdb_id      INTEGER NOT NULL,

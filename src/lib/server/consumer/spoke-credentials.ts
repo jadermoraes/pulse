@@ -1,7 +1,8 @@
 import type { DB } from '../db';
 import { encryptSecret, decryptSecret } from '../crypto';
 
-export type SpokeId = 'trakt' | 'stremio';
+/** Stremio is a HOUSEHOLD spoke and lives in `connections`; see consumer/household-stremio.ts. */
+export type SpokeId = 'trakt';
 
 /** After this many consecutive failures a credential is disabled and the viewer is asked to relink. */
 export const MAX_FAILS = 5;

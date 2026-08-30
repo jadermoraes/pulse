@@ -2,8 +2,13 @@ import { it, expect, beforeEach } from 'vitest';
 import { openDb, migrate, type DB } from '../db';
 import {
   saveCredential, getCredential, listEnabled, deleteCredential,
-  recordSuccess, recordFailure, recordNote
+  recordSuccess, recordFailure, recordNote, type SpokeId
 } from './spoke-credentials';
+
+// The primary key is (consumer_id, spoke), and these tests exist to prove the `spoke` half is
+// load-bearing. Stremio has since moved to the household `connections` table, so there is no
+// second SpokeId today; cast a placeholder rather than widen the union for a test's sake.
+const OTHER_SPOKE = 'other-spoke' as SpokeId;
 
 let db: DB;
 beforeEach(() => {
@@ -48,16 +53,16 @@ it('five consecutive failures disables the credential; success resets the count'
 
 it('listEnabled is scoped to one spoke', () => {
   saveCredential(db, { consumerId: 1, spoke: 'trakt', secret: 'a' });
-  saveCredential(db, { consumerId: 2, spoke: 'stremio', secret: 'b' });
+  saveCredential(db, { consumerId: 2, spoke: OTHER_SPOKE, secret: 'b' });
   expect(listEnabled(db, 'trakt').map((c) => c.consumerId)).toEqual([1]);
 });
 
 it('delete removes only that consumer + spoke', () => {
   saveCredential(db, { consumerId: 1, spoke: 'trakt', secret: 'a' });
-  saveCredential(db, { consumerId: 1, spoke: 'stremio', secret: 'b' });
+  saveCredential(db, { consumerId: 1, spoke: OTHER_SPOKE, secret: 'b' });
   deleteCredential(db, 1, 'trakt');
   expect(getCredential(db, 1, 'trakt')).toBeNull();
-  expect(getCredential(db, 1, 'stremio')).not.toBeNull();
+  expect(getCredential(db, 1, OTHER_SPOKE)).not.toBeNull();
 });
 
 it('recordNote makes a message visible without counting it toward MAX_FAILS', () => {

@@ -92,6 +92,27 @@ describe('setServiceLinks — validation / filtering', () => {
   });
 });
 
+describe('getServiceLinks — non-launchable connection types', () => {
+  it('excludes a stremio connection from launcher tiles, unlike jellyfin', async () => {
+    createConnection(db, { type: 'stremio', name: 'Stremio', baseUrl: 'https://api.strem.io', secret: 'ak', options: {} });
+    createConnection(db, { type: 'jellyfin', name: 'Jellyfin', baseUrl: 'http://jellyfin:8096', secret: null, options: {} });
+    const links = await getServiceLinks(db);
+    expect(links).toEqual([{ name: 'Jellyfin', url: 'http://jellyfin:8096' }]);
+  });
+
+  it('skips a stremio connection as the docker host even when it sorts first', async () => {
+    // Stremio is created first (lower id) so a `.find()` with no type guard would pick it.
+    createConnection(db, { type: 'stremio', name: 'Stremio', baseUrl: 'https://api.strem.io', secret: 'ak', options: {} });
+    createConnection(db, { type: 'jellyfin', name: 'Jellyfin', baseUrl: 'http://jellyfin:8096', secret: null, options: {} });
+    vi.spyOn(docker, 'dockerRequest').mockResolvedValue({ status: 200, data: [
+      { Names: ['/portainer'], Ports: [{ PrivatePort: 9000, PublicPort: 9000, Type: 'tcp' }] }
+    ] } as any);
+    const links = await getServiceLinks(db);
+    const portainer = links.find((l) => l.name === 'portainer');
+    expect(portainer?.url).toBe('http://jellyfin:9000');
+  });
+});
+
 describe('getServiceLinks — docker auto-list', () => {
   beforeEach(() => {
     // A connection gives us a known host for building docker URLs.

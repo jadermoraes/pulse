@@ -32,6 +32,18 @@ function hostPortKey(url: string): string | null {
   }
 }
 
+/**
+ * Connection types that exist only to hold a credential — they are not services a person opens
+ * in a browser, and their baseUrl is a machine API endpoint (or a placeholder that only exists
+ * because config import rejects an empty one). They must never become a launcher tile, and must
+ * never be picked as the Docker host.
+ */
+const NON_LAUNCHABLE_TYPES = new Set(['stremio']);
+
+function launchable(c: { type: string; enabled: boolean; baseUrl: string }): boolean {
+  return c.enabled && !NON_LAUNCHABLE_TYPES.has(c.type) && !!c.baseUrl && c.baseUrl.trim() !== '';
+}
+
 /** Compute the curated/derived links (saved setting OR connection-derived defaults). */
 function baseLinks(db: DB): ServiceLink[] {
   const raw = getSetting(db, SETTING_KEY);
@@ -46,13 +58,13 @@ function baseLinks(db: DB): ServiceLink[] {
   // Derive defaults from enabled connections that have a non-empty baseUrl.
   // Use the PUBLIC connection list so we never decrypt secrets just to discard them.
   return listConnectionsPublic(db)
-    .filter((c) => c.enabled && c.baseUrl && c.baseUrl.trim() !== '')
+    .filter(launchable)
     .map((c) => ({ name: c.name, url: c.baseUrl.trim() }));
 }
 
 /** Resolve the host used to build Docker container URLs, or null if unknown. */
 function dockerHost(db: DB): string | null {
-  const conn = listConnectionsPublic(db).find((c) => c.enabled && c.baseUrl && c.baseUrl.trim() !== '');
+  const conn = listConnectionsPublic(db).find(launchable);
   if (conn) {
     try {
       return new URL(conn.baseUrl.trim()).hostname;

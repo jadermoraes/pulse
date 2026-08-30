@@ -5,8 +5,12 @@ import { getJsonWithKey, joinUrl } from '../http';
 import { datastoreGet, datastorePut, StremioError, type StremioLibraryItem } from '../integrations/stremio';
 import { resolveImdbMeta } from '../integrations/cinemeta';
 import { importWatchlist, listWatchlist, removeWatchlist } from './watchlist';
-import { listEnabled, recordSuccess, recordFailure, recordNote } from './spoke-credentials';
+import {
+  getStremioConnection, participantIds,
+  recordHouseholdSuccess, recordHouseholdNote, recordHouseholdFailure
+} from './household-stremio';
 import { reconcile, stremioType, type PulseItem, type StremioItem, type ReconcileResult } from './stremio-reconcile';
+import { listHouseholdRemovals, clearHouseholdRemovals } from './household-removals';
 
 /** Forward tmdb -> imdb via Seerr, cached in imdb_meta_cache's row for the same pair. */
 async function imdbForTmdb(
@@ -75,27 +79,55 @@ function inFlightRequests(
   }));
 }
 
+function dedupeKey(tmdbId: number, mediaType: string): string {
+  return `${tmdbId}:${mediaType === 'tv' ? 'tv' : 'movie'}`;
+}
+
+/**
+ * The household list is the UNION of every participant's watchlist and in-flight requests,
+ * one entry per (tmdbId, mediaType) no matter how many people contributed it. From Stremio's
+ * side that is one list, which is what a shared TV should show.
+ *
+ * Within a participant the existing rule holds: a watchlist row wins over a request row for the
+ * same title (it carries on_server). Across participants, `onServer` is AND-ed. `onServer` drives
+ * "drop it from the Library once it has landed", so a title one person is still waiting on must
+ * stay in the list; taking the first contributor's flag, or OR-ing, would yank a title off the
+ * shared TV while somebody was still queued for it.
+ *
+ * The participant order decides which contributor's title text is displayed. Callers pass ids in
+ * a stable order so a poll cycle is deterministic.
+ */
 export async function loadPulseItems(
-  db: DB, consumerId: number, seerr: Connection | null
+  db: DB, participants: number[], seerr: Connection | null
 ): Promise<PulseItem[]> {
-  const watchlist = listWatchlist(db, consumerId);
-  const seen = new Set(watchlist.map((r) => `${r.tmdbId}:${r.mediaType === 'tv' ? 'tv' : 'movie'}`));
-  const rows: Array<{ tmdbId: number; mediaType: string; title: string; onServer: boolean }> = [
-    ...watchlist.map((r) => ({ tmdbId: r.tmdbId, mediaType: r.mediaType, title: r.title, onServer: r.onServer })),
-    ...inFlightRequests(db, consumerId)
-      .filter((q) => !seen.has(`${q.tmdbId}:${q.mediaType === 'tv' ? 'tv' : 'movie'}`))
-      .map((q) => ({ tmdbId: q.tmdbId, mediaType: q.mediaType, title: q.title, onServer: q.onServer }))
-  ];
+  const merged = new Map<string, { tmdbId: number; mediaType: 'movie' | 'tv'; title: string; onServer: boolean }>();
+
+  for (const consumerId of participants) {
+    const watchlist = listWatchlist(db, consumerId);
+    const seen = new Set(watchlist.map((r) => dedupeKey(r.tmdbId, r.mediaType)));
+    const rows: Array<{ tmdbId: number; mediaType: string; title: string; onServer: boolean }> = [
+      ...watchlist.map((r) => ({ tmdbId: r.tmdbId, mediaType: r.mediaType, title: r.title, onServer: r.onServer })),
+      ...inFlightRequests(db, consumerId).filter((q) => !seen.has(dedupeKey(q.tmdbId, q.mediaType)))
+    ];
+    for (const r of rows) {
+      const mediaType = r.mediaType === 'tv' ? 'tv' : 'movie';
+      const k = dedupeKey(r.tmdbId, mediaType);
+      const prev = merged.get(k);
+      merged.set(k, prev
+        ? { ...prev, onServer: prev.onServer && r.onServer }
+        : { tmdbId: r.tmdbId, mediaType, title: r.title, onServer: r.onServer });
+    }
+  }
+
   const out: PulseItem[] = [];
-  for (const r of rows) {
-    const mediaType = r.mediaType === 'tv' ? 'tv' : 'movie';
-    const imdbId = await imdbForTmdb(db, seerr, r.tmdbId, mediaType);
+  for (const r of merged.values()) {
+    const imdbId = await imdbForTmdb(db, seerr, r.tmdbId, r.mediaType);
     const st = db.prepare(
-      `SELECT dropped_at FROM sync_state
-        WHERE consumer_id=? AND spoke='stremio' AND entity='watchlist' AND tmdb_id=? AND media_type=?`
-    ).get(consumerId, r.tmdbId, mediaType) as any;
+      `SELECT dropped_at FROM household_sync_state
+        WHERE spoke='stremio' AND entity='watchlist' AND tmdb_id=? AND media_type=?`
+    ).get(r.tmdbId, r.mediaType) as any;
     out.push({
-      tmdbId: r.tmdbId, mediaType, imdbId, title: r.title,
+      tmdbId: r.tmdbId, mediaType: r.mediaType, imdbId, title: r.title,
       onServer: r.onServer, droppedAt: st?.dropped_at ?? null
     });
   }
@@ -174,13 +206,15 @@ export function buildLibraryItem(
   } as StremioLibraryItem;
 }
 
-function markSynced(db: DB, consumerId: number, p: PulseItem, dropped: number | null): void {
+function markSynced(
+  db: DB, p: Pick<PulseItem, 'tmdbId' | 'mediaType'>, dropped: number | null
+): void {
   db.prepare(
-    `INSERT INTO sync_state(consumer_id,spoke,entity,tmdb_id,media_type,synced_at,dropped_at)
-     VALUES (?,'stremio','watchlist',?,?,?,?)
-     ON CONFLICT(consumer_id,spoke,entity,tmdb_id,media_type) DO UPDATE SET
+    `INSERT INTO household_sync_state(spoke,entity,tmdb_id,media_type,synced_at,dropped_at)
+     VALUES ('stremio','watchlist',?,?,?,?)
+     ON CONFLICT(spoke,entity,tmdb_id,media_type) DO UPDATE SET
        synced_at=excluded.synced_at, dropped_at=excluded.dropped_at`
-  ).run(consumerId, p.tmdbId, p.mediaType, Date.now(), dropped);
+  ).run(p.tmdbId, p.mediaType, Date.now(), dropped);
 }
 
 /**
@@ -204,24 +238,42 @@ export const MAX_IMPORTS_PER_CYCLE = 25;
  * indistinguishable from a clean one — `recordSuccess` wiped `last_error` either way — so the
  * caller needs this to tell the two apart.
  */
-export async function applyPull(db: DB, consumerId: number, plan: ReconcileResult): Promise<number> {
+export async function applyPull(
+  db: DB, participants: number[], plan: ReconcileResult, suppressed: Set<string> = new Set()
+): Promise<number> {
   let skipped = 0;
   for (const s of plan.importItems.slice(0, MAX_IMPORTS_PER_CYCLE)) {
     try {
       const type = s.type === 'series' ? 'series' : 'movie';
       const meta = await resolveImdbMeta(db, s.imdbId, type);
       if (!meta || meta.tmdbId === null) continue; // unresolvable: not an error
+      const tmdbId = meta.tmdbId;
+      const name = meta.name;
       const mediaType = type === 'series' ? 'tv' : 'movie';
-      // importWatchlist, NOT addWatchlist: an import must never clobber a row pulse already owns
-      // (its on_server flag in particular), and never arms a notify the viewer didn't ask for.
-      importWatchlist(db, {
-        consumerId, tmdbId: meta.tmdbId, mediaType, title: meta.name, onServer: false
-      });
-      db.prepare(
-        `INSERT INTO sync_state(consumer_id,spoke,entity,tmdb_id,media_type,synced_at,dropped_at)
-         VALUES (?,'stremio','watchlist',?,?,?,NULL)
-         ON CONFLICT(consumer_id,spoke,entity,tmdb_id,media_type) DO UPDATE SET synced_at=excluded.synced_at`
-      ).run(consumerId, meta.tmdbId, mediaType, Date.now());
+      // A title with a pending removal must not be re-imported, even when we could not resolve its
+      // imdb id upstream and so could not exclude it from the reconciler's input. `resolveImdbMeta`
+      // has just given us the tmdb id the queue is keyed on, so this is the first point where the
+      // two can be compared at all.
+      if (suppressed.has(`${tmdbId}:${mediaType}`)) continue;
+      // The fan-out and its provenance row commit together or not at all. A half-applied import
+      // is the worst outcome available: the household_sync_state row makes the title "already
+      // known", so the next cycle will not retry it, while some participants never received it.
+      // The Cinemeta fetch is deliberately outside the transaction — better-sqlite3 transactions
+      // are synchronous and must not await.
+      db.transaction(() => {
+        for (const consumerId of participants) {
+          // importWatchlist, NOT addWatchlist: an import must never clobber a row pulse already
+          // owns (its on_server flag in particular), and never arms a notify the viewer didn't
+          // ask for. On a first link this loop can see a hundred titles; notify=1 would fire a
+          // push AND a Telegram DM AND a Jellyfin favourite for every one of them, per person.
+          importWatchlist(db, { consumerId, tmdbId, mediaType, title: name, onServer: false });
+        }
+        db.prepare(
+          `INSERT INTO household_sync_state(spoke,entity,tmdb_id,media_type,synced_at,dropped_at)
+           VALUES ('stremio','watchlist',?,?,?,NULL)
+           ON CONFLICT(spoke,entity,tmdb_id,media_type) DO UPDATE SET synced_at=excluded.synced_at`
+        ).run(tmdbId, mediaType, Date.now());
+      })();
     } catch {
       // one bad title never blocks the rest — matches plays-ingest's contract. A Cinemeta 5xx
       // on this id must not also stall every OTHER import and every pending delete this cycle.
@@ -230,114 +282,184 @@ export async function applyPull(db: DB, consumerId: number, plan: ReconcileResul
   }
 
   for (const p of plan.deleteItems) {
-    removeWatchlist(db, consumerId, p.tmdbId, p.mediaType);
-    db.prepare(
-      `DELETE FROM sync_state
-        WHERE consumer_id=? AND spoke='stremio' AND entity='watchlist' AND tmdb_id=? AND media_type=?`
-    ).run(consumerId, p.tmdbId, p.mediaType);
+    // Inbound removals DO fan out. The reconciler has already excluded removals pulse itself
+    // performed, so this is a person deleting the title on the TV. Removing it from only some
+    // participants would leave the others still contributing it to the union — pulse would push
+    // it straight back and it would reappear on the TV, which is the ping-pong the reconciler's
+    // dropped_at guard exists to prevent, re-introduced one level up.
+    //
+    // The OUTBOUND direction is deliberately NOT symmetric: a participant removing a title in
+    // pulse only stops contributing it, and it leaves the TV when the last contributor drops it.
+    db.transaction(() => {
+      for (const consumerId of participants) removeWatchlist(db, consumerId, p.tmdbId, p.mediaType);
+      db.prepare(
+        `DELETE FROM household_sync_state
+          WHERE spoke='stremio' AND entity='watchlist' AND tmdb_id=? AND media_type=?`
+      ).run(p.tmdbId, p.mediaType);
+    })();
   }
 
   return skipped;
 }
 
-/** Push stage. Per-consumer isolated: one broken authKey never stalls another viewer. */
+/** Household-scoped: one Stremio account, one authKey, shared by the nominated consumers. */
 export async function pollStremioSync(db: DB): Promise<void> {
+  const conn = getStremioConnection(db);
+  if (!conn || !conn.enabled || !conn.secret) return;
+
+  // Sorted so the union's title choice and the push order are stable across cycles.
+  const participants = participantIds(db, conn).slice().sort((a, b) => a - b);
+  if (participants.length === 0) {
+    // Bail BEFORE any network call. With an empty pulse list the reconciler reads the entire TV
+    // Library as importable, and applyPull would stamp household_sync_state rows for titles that
+    // landed on nobody — poisoning the "already known" check for whoever is added later.
+    recordHouseholdNote(db, 'No pulse users are selected as participants, so nothing is being synced.');
+    return;
+  }
+
   const seerr = listConnections(db).find((c) => c.type === 'seerr' && c.enabled) ?? null;
 
-  for (const cred of listEnabled(db, 'stremio')) {
-    try {
-      const library = await datastoreGet(cred.secret);
-      const stremioItems: StremioItem[] = library.map((i) => ({
-        imdbId: i._id, type: i.type, removed: i.removed
-      }));
-      const pulseItems = await loadPulseItems(db, cred.consumerId, seerr);
-      const plan = reconcile(pulseItems, stremioItems);
+  try {
+    const library = await datastoreGet(conn.secret);
+    const pulseItems = await loadPulseItems(db, participants, seerr);
 
-      const byId = new Map(library.map((i) => [i._id, i]));
-      const template = library[0] ?? null;
-      const changes: StremioLibraryItem[] = [];
-      // sync_state writes are staged here and applied only once `datastorePut` below has
-      // actually succeeded. Writing them eagerly (as this loop used to) means a transient
-      // datastorePut failure — a 5xx, a timeout — still commits e.g. `dropped_at = NULL` for a
-      // re-pushed, still-tombstoned item; the NEXT cycle then reads that premature clear and the
-      // reconciler routes the item to `deleteItems`, destroying the viewer's watchlist row over
-      // nothing more than a network blip. `clearDropped` is the only path meant to clear the
-      // stamp on its own steam (it does so only once Stremio itself confirms the item present).
-      const syncUpdates: Array<{ p: PulseItem; dropped: number | null }> = [];
+    // ── Drain the household removal queue ─────────────────────────────────
+    // A title a participant removed in pulse is, right now, present in the Library and absent
+    // from every watchlist — which is exactly the condition the reconciler reads as "unknown to
+    // pulse, import it". So these ids are handled HERE and then hidden from the reconciler
+    // entirely; letting one reach it would re-import the title and undo the removal.
+    //
+    // This MUST run after loadPulseItems. A title can come back between the removal and this
+    // poll — the same person changing their mind, or another participant re-adding it, since the
+    // queue is household-wide and the window is one poll interval. If we tombstoned it anyway we
+    // would put two contradictory documents for one _id into a single datastorePut, and if the
+    // tombstone won, the NEXT cycle would read it as a viewer deletion and drop the row from
+    // every participant.
+    const wantedNow = new Set(
+      pulseItems.map((p) => p.imdbId).filter((v): v is string => !!v)
+    );
+    const pendingRemovals = listHouseholdRemovals(db);
+    const removalById = new Map(
+      pendingRemovals
+        .filter((r) => r.imdbId && !wantedNow.has(r.imdbId))
+        .map((r) => [r.imdbId as string, r])
+    );
+    const excluded = new Set(removalById.keys());
+    const removalChanges: StremioLibraryItem[] = [];
+    for (const item of library) {
+      if (!removalById.has(item._id) || item.removed) continue;
+      // read-modify-write: only `removed` and `_mtime` are ours. `state` is the household's real
+      // cross-device watch progress and datastorePut is a full-document replace.
+      removalChanges.push({ ...item, removed: true, _mtime: new Date().toISOString() });
+    }
+    // Every queued row is settled this cycle — pushed, already gone from Stremio, unresolvable, or
+    // superseded because somebody wants the title again. All four reach the same end state: there
+    // is nothing left to do, and retrying would leak the queue. Note `settledRemovals` is built
+    // from the FULL snapshot, not from removalById, so the superseded ones clear too.
+    const settledRemovals = pendingRemovals.map((r) => ({ tmdbId: r.tmdbId, mediaType: r.mediaType }));
+    // Built from the FULL snapshot, not from `removalById`: a queued row with no imdb id never
+    // reaches `excluded`, so the reconciler still hands its title to the import stage. Suppressing
+    // by tmdb id there is the only place such a removal can be honoured at all — otherwise it is
+    // actively UNDONE, re-imported into every participant on the very cycle it is settled.
+    const suppressedRemovals = new Set(
+      pendingRemovals.map((r) => `${r.tmdbId}:${r.mediaType}`)
+    );
 
-      for (const p of plan.push) {
-        // Guarded per item, in the same spirit as the import loop. `imdbForTmdb` only ever
-        // UPDATEs a Cinemeta-created cache row, so a Seerr-sourced imdb id has no row and goes to
-        // the network here — and `fetchCinemetaMeta` throws on any non-404 non-2xx. Unguarded,
-        // that one id's 5xx escapes past datastorePut, past the sync_state drain and past
-        // applyPull, aborting every other push, every pending delete and every import for this
-        // consumer, every cycle, for as long as Cinemeta dislikes it. buildLibraryItem already
-        // handles `meta === null`, so pushing without metadata is a legal fallback.
-        let meta: { name: string; poster: string | null } | null = null;
-        try {
-          meta = await resolveImdbMeta(db, p.imdbId!, stremioType(p.mediaType));
-        } catch {
-          meta = null;
-        }
-        // Prefer the item's OWN current shape when Stremio already has it (e.g. reviving a
-        // title pulse tombstoned earlier): that item's `state` is the viewer's real progress,
-        // not a borrowed shape, and buildLibraryItem must not zero it. Only fall back to an
-        // unrelated item's shape when this id is genuinely new to the library.
-        changes.push(buildLibraryItem(p, byId.get(p.imdbId!) ?? template, meta));
-        syncUpdates.push({ p, dropped: null });
+    const stremioItems: StremioItem[] = library
+      .filter((i) => !excluded.has(i._id))
+      .map((i) => ({ imdbId: i._id, type: i.type, removed: i.removed }));
+    const plan = reconcile(pulseItems, stremioItems);
+
+    const byId = new Map(library.map((i) => [i._id, i]));
+    const template = library[0] ?? null;
+    const changes: StremioLibraryItem[] = [...removalChanges];
+    // sync_state writes are staged here and applied only once `datastorePut` below has
+    // actually succeeded. Writing them eagerly means a transient datastorePut failure — a 5xx,
+    // a timeout — still commits e.g. `dropped_at = NULL` for a re-pushed, still-tombstoned item;
+    // the NEXT cycle then reads that premature clear and the reconciler routes the item to
+    // `deleteItems`, destroying watchlist rows over nothing more than a network blip.
+    const syncUpdates: Array<{ p: PulseItem; dropped: number | null }> = [];
+
+    for (const p of plan.push) {
+      // Guarded per item, in the same spirit as the import loop. `imdbForTmdb` only ever UPDATEs
+      // a Cinemeta-created cache row, so a Seerr-sourced imdb id has no row and goes to the
+      // network here — and `fetchCinemetaMeta` throws on any non-404 non-2xx. Unguarded, that one
+      // id's 5xx escapes past datastorePut, past the sync_state drain and past applyPull.
+      let meta: { name: string; poster: string | null } | null = null;
+      try {
+        meta = await resolveImdbMeta(db, p.imdbId!, stremioType(p.mediaType));
+      } catch {
+        meta = null;
       }
+      // Prefer the item's OWN current shape when Stremio already has it (e.g. reviving a title
+      // pulse tombstoned earlier): that item's `state` is the household's real progress, not a
+      // borrowed shape, and buildLibraryItem must not zero it.
+      changes.push(buildLibraryItem(p, byId.get(p.imdbId!) ?? template, meta));
+      syncUpdates.push({ p, dropped: null });
+    }
 
-      for (const p of plan.remove) {
-        const existing = byId.get(p.imdbId!);
-        if (!existing) continue;
-        // read-modify-write: only `removed` and `_mtime` are ours. Watch progress lives in
-        // `state` and is synced across the viewer's devices — clobbering it would erase it.
-        changes.push({ ...existing, removed: true, _mtime: new Date().toISOString() });
-        syncUpdates.push({ p, dropped: Date.now() });
-      }
+    for (const p of plan.remove) {
+      const existing = byId.get(p.imdbId!);
+      if (!existing) continue;
+      // read-modify-write: only `removed` and `_mtime` are ours. Watch progress lives in `state`
+      // and is synced across the household's devices — clobbering it would erase it.
+      changes.push({ ...existing, removed: true, _mtime: new Date().toISOString() });
+      syncUpdates.push({ p, dropped: Date.now() });
+    }
 
-      for (const p of plan.clearDropped) syncUpdates.push({ p, dropped: null });
+    for (const p of plan.clearDropped) syncUpdates.push({ p, dropped: null });
 
-      await datastorePut(cred.secret, changes);
-      for (const { p, dropped } of syncUpdates) markSynced(db, cred.consumerId, p, dropped);
-      const skipped = await applyPull(db, cred.consumerId, plan);
+    await datastorePut(conn.secret, changes);
+    for (const { p, dropped } of syncUpdates) markSynced(db, p, dropped);
+    // A queued removal is pulse removing a title from Stremio, exactly like `plan.remove` above,
+    // so it needs the same provenance stamp. Without it the reconciler reads the tombstone as a
+    // VIEWER deletion on the next cycle, and `deleteItems` fans a removeWatchlist out to every
+    // participant — eating any re-add, forever, one poll after each attempt.
+    for (const c of removalChanges) {
+      const r = removalById.get(c._id as string);
+      if (r) markSynced(db, { tmdbId: r.tmdbId, mediaType: r.mediaType }, Date.now());
+    }
+    clearHouseholdRemovals(db, settledRemovals);
+    const skipped = await applyPull(db, participants, plan, suppressedRemovals);
 
-      const notes: string[] = [];
-      // The push direction is a silent no-op without Seerr: `imdbForTmdb` is the ONLY forward
-      // tmdb -> imdb path, it returns null when no Seerr connection is enabled, and the
-      // reconciler skips every item with a null imdb id. The pull keeps working, so the link
-      // looks healthy while nothing pulse owns ever reaches Stremio. Say so out loud.
-      const unresolved = pulseItems.filter((p) => p.imdbId === null).length;
-      if (plan.push.length === 0 && unresolved > 0 && !seerr) {
-        notes.push(
-          `${unresolved} title(s) could not be pushed to Stremio: matching a pulse title to an ` +
-          'IMDb id needs an enabled Seerr connection, and none is configured.'
-        );
-      }
-      if (skipped > 0) {
-        notes.push(`${skipped} title(s) saved in Stremio could not be imported this cycle (metadata lookup failed).`);
-      }
-      // recordSuccess first: the credential itself worked (datastoreGet and datastorePut both
-      // succeeded), so last_sync_at must advance and fail_count must reset. recordNote then
-      // leaves the caveat visible instead of letting recordSuccess's blanket last_error=NULL
-      // present a cycle that dropped every import as a clean one.
-      recordSuccess(db, cred.consumerId, 'stremio');
-      if (notes.length) recordNote(db, cred.consumerId, 'stremio', notes.join(' '));
-    } catch (e) {
-      const message = (e as Error).message;
-      // `fail_count` never decays, so counting every thrown error toward MAX_FAILS would let a
-      // brief Stremio 5xx, a Cinemeta hiccup, or a DNS blip (recoverable, ~5 ticks = ~10 min)
-      // permanently disable an authKey that was never actually invalid. Two signals mean the
-      // credential itself is genuinely dead: Stremio's own error code 1 = "Invalid auth" (see
-      // integrations/stremio.test.ts), carried in a 200 body, or an HTTP 401/403 from
-      // api.strem.io directly (mirrors trakt-sync.ts treating both statuses as fatal). Anything
-      // else is merely noted.
-      const authDead = e instanceof StremioError && (e.code === 1 || e.status === 401 || e.status === 403);
-      if (authDead) {
-        recordFailure(db, cred.consumerId, 'stremio', message);
-      } else {
-        recordNote(db, cred.consumerId, 'stremio', message);
-      }
+    const notes: string[] = [];
+    // The push direction is a silent no-op without Seerr: `imdbForTmdb` is the ONLY forward
+    // tmdb -> imdb path, it returns null when no Seerr connection is enabled, and the reconciler
+    // skips every item with a null imdb id. The pull keeps working, so the link looks healthy
+    // while nothing pulse owns ever reaches Stremio. Say so out loud.
+    const unresolved = pulseItems.filter((p) => p.imdbId === null).length;
+    if (plan.push.length === 0 && unresolved > 0 && !seerr) {
+      notes.push(
+        `${unresolved} title(s) could not be pushed to Stremio: matching a pulse title to an ` +
+        'IMDb id needs an enabled Seerr connection, and none is configured.'
+      );
+    }
+    if (skipped > 0) {
+      notes.push(`${skipped} title(s) saved in Stremio could not be imported this cycle (metadata lookup failed).`);
+    }
+    const unpushableRemovals = pendingRemovals.filter((r) => !r.imdbId).length;
+    if (unpushableRemovals > 0) {
+      notes.push(
+        `${unpushableRemovals} removed title(s) could not be taken off the Stremio Library: ` +
+        'pulse has no IMDb id for them, so there is nothing to remove there.'
+      );
+    }
+    // recordHouseholdSuccess first: the credential itself worked, so lastSyncAt must advance and
+    // failCount must reset. recordHouseholdNote then leaves the caveat visible instead of letting
+    // the blanket lastError=null present a cycle that dropped every import as a clean one.
+    recordHouseholdSuccess(db);
+    if (notes.length) recordHouseholdNote(db, notes.join(' '));
+  } catch (e) {
+    const message = (e as Error).message;
+    // `failCount` never decays, so counting every thrown error toward MAX_FAILS would let a brief
+    // Stremio 5xx, a Cinemeta hiccup, or a DNS blip permanently disable an authKey that was never
+    // invalid. Two signals mean the credential itself is dead: Stremio's own error code 1 =
+    // "Invalid auth", carried in a 200 body, or an HTTP 401/403 from api.strem.io directly.
+    const authDead = e instanceof StremioError && (e.code === 1 || e.status === 401 || e.status === 403);
+    if (authDead) {
+      recordHouseholdFailure(db, message);
+    } else {
+      recordHouseholdNote(db, message);
     }
   }
 }

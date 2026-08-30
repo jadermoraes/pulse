@@ -69,6 +69,10 @@
       const withConns = allSections.find((s: any) => s.conns.length > 0);
       selectedType = (withConns ?? allSections[0]).type;
     }
+    // Connections is the DEFAULT tab, so this one is unconditional — and deliberately NOT in
+    // setTab(): the state persists once loaded, so a second call per tab switch buys nothing.
+    void loadStremio();
+    void loadAddon();
   });
 
   function setTab(t: Tab) {
@@ -462,6 +466,206 @@
       body: JSON.stringify({ id })
     });
     await loadAiConnections();
+  }
+
+  // ── Household Stremio ──
+  type StremioState = {
+    linked: boolean; enabled: boolean; email: string; participantIds: number[];
+    lastSyncAt: number | null; lastError: string | null;
+    consumers: Array<{ id: number; displayName: string }>;
+  };
+  let stremio = $state<StremioState | null>(null);
+  let stremioEmail = $state('');
+  let stremioPassword = $state('');
+  let stremioPicked = $state<number[]>([]);
+  let stremioBusy = $state(false);
+  let stremioErr = $state<string | null>(null);
+  let stremioMsg = $state<string | null>(null);
+  let stremioShowForm = $state(false);
+
+  async function loadStremio() {
+    try {
+      const r: StremioState = await fetch('/api/stremio').then((x) => x.json());
+      stremio = r;
+      stremioPicked = [...r.participantIds];
+      stremioShowForm = !r.linked;
+    } catch { /* ignore */ }
+  }
+
+  async function linkStremio() {
+    stremioErr = null; stremioMsg = null; stremioBusy = true;
+    const email = stremioEmail;
+    const password = stremioPassword;
+    // The password only ever needs to live long enough to build this one request body — clear it
+    // from component state immediately rather than holding it for the lifetime of the request.
+    stremioPassword = '';
+    try {
+      const res = await fetch('/api/stremio', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password })
+      });
+      if (!res.ok) {
+        // A thrown `error()` from a +server.ts arrives as a JSON body, not text — reading it with
+        // .text() prints the raw envelope at the admin. Same shape the reset handler uses above.
+        const body = await res.json().catch(() => ({}) as { message?: string });
+        stremioErr =
+          res.status === 400 ? $_('settings.stremio.badCredentials')
+          : res.status === 429 ? (body.message ?? $_('settings.stremio.unreachable'))
+          : $_('settings.stremio.unreachable');
+        return;
+      }
+      stremioEmail = '';
+      await loadStremio();
+    } catch {
+      stremioErr = $_('settings.stremio.unreachable');
+    } finally {
+      stremioBusy = false;
+    }
+  }
+
+  async function saveStremioParticipants() {
+    stremioErr = null; stremioMsg = null; stremioBusy = true;
+    try {
+      const res = await fetch('/api/stremio', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ participantIds: stremioPicked })
+      });
+      if (!res.ok) {
+        // Do NOT claim "Saved." — loadStremio() below would silently revert the checkboxes and
+        // the admin would read a success message next to unsaved state.
+        const body = await res.json().catch(() => ({}) as { message?: string });
+        stremioErr = body.message ?? $_('settings.stremio.unreachable');
+        await loadStremio();
+        return;
+      }
+      await loadStremio();
+      stremioMsg = $_('settings.stremio.saved');
+    } catch {
+      stremioErr = $_('settings.stremio.unreachable');
+    } finally {
+      stremioBusy = false;
+    }
+  }
+
+  async function unlinkStremioConn() {
+    stremioErr = null; stremioMsg = null; stremioBusy = true;
+    try {
+      const res = await fetch('/api/stremio', { method: 'DELETE' });
+      if (!res.ok) {
+        // A failed unlink leaves the connection in place — surface it instead of swallowing it,
+        // or the panel just redraws as linked with no explanation.
+        const body = await res.json().catch(() => ({}) as { message?: string });
+        stremioErr = body.message ?? $_('settings.stremio.unreachable');
+        await loadStremio();
+        return;
+      }
+      await loadStremio();
+    } catch {
+      stremioErr = $_('settings.stremio.unreachable');
+    } finally { stremioBusy = false; }
+  }
+
+  async function testStremio() {
+    stremioErr = null; stremioMsg = null; stremioBusy = true;
+    try {
+      const r = await fetch('/api/stremio/test', { method: 'POST' }).then((x) => x.json());
+      if (r.ok) {
+        stremioMsg = $_('settings.stremio.testOk', { values: { active: r.active, total: r.total } });
+      } else {
+        stremioErr = r.message ?? $_('settings.stremio.unreachable');
+      }
+    } catch {
+      stremioErr = $_('settings.stremio.unreachable');
+    } finally {
+      stremioBusy = false;
+    }
+  }
+
+  function toggleParticipant(id: number, on: boolean) {
+    stremioPicked = on ? [...new Set([...stremioPicked, id])] : stremioPicked.filter((x) => x !== id);
+  }
+
+  // ── Stremio addon (inbound) ──
+  // The token below is a BEARER credential: it sits in a URL path and grants browsing, playback
+  // and requesting to whoever holds it. The panel is the only place that says so, hence the
+  // permanently-visible tokenWarning / lanOnly lines rather than a hint tucked under a fold.
+  type AddonState = {
+    linked: boolean; token: string | null; consumerId: number | null; label: string | null;
+    createdAt: number | null; lastUsedAt: number | null;
+    consumers: Array<{ id: number; displayName: string }>;
+  };
+  let addon = $state<AddonState | null>(null);
+  let addonConsumerId = $state<number | null>(null);
+  let addonLabel = $state('');
+  let addonBusy = $state(false);
+  let addonErr = $state<string | null>(null);
+  let addonCopied = $state(false);
+  let addonCopyTimer: ReturnType<typeof setTimeout> | null = null;
+
+  // `location` is browser-only; `addon` is null until onMount fetches, so this never evaluates
+  // during SSR, and the extra typeof guard keeps that true even if the load order changes.
+  const addonUrl = $derived(
+    addon?.token && typeof location !== 'undefined'
+      ? `${location.origin}/api/_public/addon/${addon.token}/manifest.json`
+      : ''
+  );
+
+  async function loadAddon() {
+    try {
+      const r: AddonState = await fetch('/api/addon').then((x) => x.json());
+      addon = r;
+      // Preselect the attributed consumer, else the first on the roster — a mint with a null
+      // consumerId is rejected by the endpoint, so the select must never start empty.
+      addonConsumerId = r.consumerId ?? r.consumers[0]?.id ?? null;
+      addonLabel = r.label ?? '';
+    } catch { /* ignore */ }
+  }
+
+  async function mintAddon() {
+    if (addonConsumerId == null) return;
+    addonErr = null; addonCopied = false; addonBusy = true;
+    try {
+      const res = await fetch('/api/addon', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ consumerId: addonConsumerId, label: addonLabel.trim() || null })
+      });
+      if (!res.ok) { addonErr = $_('settings.addon.failed'); return; }
+      // Re-read rather than trusting the POST echo: the GET is what the panel renders, and a
+      // failed refresh must not leave a stale URL on screen next to a fresh one in the clipboard.
+      await loadAddon();
+    } catch {
+      addonErr = $_('settings.addon.failed');
+    } finally {
+      addonBusy = false;
+    }
+  }
+
+  async function revokeAddon() {
+    addonErr = null; addonCopied = false; addonBusy = true;
+    try {
+      const res = await fetch('/api/addon', { method: 'DELETE' });
+      if (!res.ok) { addonErr = $_('settings.addon.failed'); await loadAddon(); return; }
+      await loadAddon();
+    } catch {
+      addonErr = $_('settings.addon.failed');
+    } finally {
+      addonBusy = false;
+    }
+  }
+
+  async function copyAddonUrl() {
+    if (!addonUrl) return;
+    try {
+      await navigator.clipboard.writeText(addonUrl);
+      addonCopied = true;
+      if (addonCopyTimer) clearTimeout(addonCopyTimer);
+      addonCopyTimer = setTimeout(() => (addonCopied = false), 1500);
+    } catch {
+      addonErr = $_('settings.addon.failed');
+    }
   }
 
   async function loadAiConnections() {
@@ -1957,6 +2161,168 @@
 
   <!-- ══════════════════ CONNECTIONS TAB ══════════════════ -->
   {#if activeTab === 'connections'}
+    <!--
+      Stremio is a HOUSEHOLD integration, not a per-connection one: one account, one authKey,
+      and an explicit list of which pulse users share it. It deliberately does NOT go through
+      the generic connection form below — that form stores whatever is typed into its password
+      box as the connection secret, and Stremio's secret must be the authKey the password is
+      exchanged for, never the password itself.
+    -->
+    <section class="hh-card">
+      <h3>{$_('settings.stremio.title')}</h3>
+      <p class="hint">{$_('settings.stremio.description')}</p>
+
+      {#if stremio?.linked}
+        <p class="hh-status">
+          <span class="badge badge-ok">{$_('settings.stremio.linked', { values: { email: stremio.email } })}</span>
+        </p>
+        {#if !stremio.enabled}
+          <p class="err">{$_('settings.stremio.disabled')}</p>
+        {/if}
+        {#if stremio.lastError}
+          <p class="err">{stremio.lastError}</p>
+        {/if}
+        <p class="hint">
+          {$_('settings.stremio.lastSync', { values: {
+            when: stremio.lastSyncAt ? new Date(stremio.lastSyncAt).toLocaleString() : $_('settings.stremio.never')
+          } })}
+        </p>
+
+        <fieldset class="hh-participants">
+          <legend>{$_('settings.stremio.participants')}</legend>
+          <p class="hint">{$_('settings.stremio.participantsHint')}</p>
+          {#if stremio.consumers.length === 0}
+            <p class="empty-hint">{$_('settings.stremio.noConsumers')}</p>
+          {:else}
+            {#each stremio.consumers as c (c.id)}
+              <label class="hh-check">
+                <input
+                  type="checkbox"
+                  checked={stremioPicked.includes(c.id)}
+                  onchange={(e) => toggleParticipant(c.id, (e.currentTarget as HTMLInputElement).checked)}
+                />
+                {c.displayName}
+              </label>
+            {/each}
+          {/if}
+          {#if stremioPicked.length === 0}
+            <p class="hint">{$_('settings.stremio.noParticipants')}</p>
+          {/if}
+        </fieldset>
+
+        <div class="form-actions">
+          <button type="button" class="btn btn-s" onclick={testStremio} disabled={stremioBusy}>{$_('settings.stremio.test')}</button>
+          <button type="button" class="btn btn-s" onclick={() => { stremioShowForm = true; }} disabled={stremioBusy}>{$_('settings.stremio.relink')}</button>
+          <button type="button" class="btn btn-s" onclick={unlinkStremioConn} disabled={stremioBusy}>{$_('settings.stremio.disconnect')}</button>
+          <button type="button" class="btn btn-p" onclick={saveStremioParticipants} disabled={stremioBusy}>{$_('settings.stremio.save')}</button>
+        </div>
+      {:else}
+        <p class="hint">{$_('settings.stremio.notLinked')}</p>
+      {/if}
+
+      {#if stremioShowForm}
+        <form class="hh-form" onsubmit={(e) => { e.preventDefault(); linkStremio(); }}>
+          <div class="field-row">
+            <label for="stremio-email">{$_('settings.stremio.email')}</label>
+            <input id="stremio-email" class="field-input" type="email" bind:value={stremioEmail} autocomplete="email" required />
+          </div>
+          <div class="field-row">
+            <label for="stremio-password">{$_('settings.stremio.password')}</label>
+            <input id="stremio-password" class="field-input" type="password" bind:value={stremioPassword} autocomplete="new-password" required />
+          </div>
+          <p class="hint">{$_('settings.stremio.passwordNote')}</p>
+          <div class="form-actions">
+            <button type="submit" class="btn btn-p" disabled={stremioBusy || !stremioEmail || !stremioPassword}>{$_('settings.stremio.connect')}</button>
+          </div>
+        </form>
+      {/if}
+
+      {#if stremioErr}<p class="err">{stremioErr}</p>{/if}
+      {#if stremioMsg}<p class="test-result test-ok">{stremioMsg}</p>{/if}
+    </section>
+
+    <!--
+      The INBOUND addon: Stremio talking to pulse, the opposite direction to the panel above.
+      Its token travels in the URL path, so the URL is the credential — the warning lines are
+      deliberately above the fold and always rendered, not conditional fine print.
+    -->
+    <section class="hh-card">
+      <h3>{$_('settings.addon.title')}</h3>
+      <p class="hint">{$_('settings.addon.description')}</p>
+
+      <p class="addon-warn">{$_('settings.addon.tokenWarning')}</p>
+      <p class="addon-warn">{$_('settings.addon.lanOnly')}</p>
+
+      {#if addon?.linked && addonUrl}
+        <div class="field-row addon-url-row">
+          <input
+            id="addon-url"
+            class="field-input addon-url"
+            type="text"
+            readonly
+            value={addonUrl}
+            aria-label={$_('settings.addon.title')}
+          />
+          <button
+            type="button"
+            class="btn btn-s addon-copy {addonCopied ? 'copied' : ''}"
+            onclick={copyAddonUrl}
+          >{addonCopied ? $_('settings.addon.copied') : $_('settings.addon.copy')}</button>
+        </div>
+        <p class="hint">
+          {addon.lastUsedAt
+            ? $_('settings.addon.lastUsed', { values: { when: new Date(addon.lastUsedAt).toLocaleString() } })
+            : $_('settings.addon.neverUsed')}
+        </p>
+      {:else}
+        <p class="hint">{$_('settings.addon.notMinted')}</p>
+      {/if}
+
+      <div class="field-row">
+        <label for="addon-consumer">{$_('settings.addon.attributedTo')}</label>
+        {#if addon && addon.consumers.length === 0}
+          <p class="empty-hint">{$_('settings.stremio.noConsumers')}</p>
+        {:else}
+          <select id="addon-consumer" class="field-input" bind:value={addonConsumerId}>
+            {#each addon?.consumers ?? [] as c (c.id)}
+              <option value={c.id}>{c.displayName}</option>
+            {/each}
+          </select>
+        {/if}
+      </div>
+
+      <div class="field-row">
+        <label for="addon-label">{$_('settings.addon.label')}</label>
+        <input
+          id="addon-label"
+          class="field-input"
+          type="text"
+          bind:value={addonLabel}
+          placeholder={$_('settings.addon.labelPlaceholder')}
+        />
+      </div>
+
+      <div class="form-actions">
+        <button
+          type="button"
+          class="btn btn-p"
+          onclick={mintAddon}
+          disabled={addonBusy || addonConsumerId == null}
+        >{addon?.linked ? $_('settings.addon.regenerate') : $_('settings.addon.generate')}</button>
+        {#if addon?.linked}
+          <button type="button" class="btn btn-s" onclick={revokeAddon} disabled={addonBusy}>
+            {$_('settings.addon.revoke')}
+          </button>
+        {/if}
+      </div>
+      {#if addon?.linked}
+        <!-- Next to Regenerate, never as a post-hoc toast: minting kills the old URL on the spot. -->
+        <p class="addon-warn">{$_('settings.addon.regenerateWarning')}</p>
+      {/if}
+
+      {#if addonErr}<p class="err">{addonErr}</p>{/if}
+    </section>
+
     <div class="master-detail" class:mobile-detail-open={isMobile && mobileDetailOpen}>
       <!-- Left rail: integration type list -->
       <nav class="md-rail" aria-label={$_('settings.connections.integrationTypes')}>
@@ -3680,4 +4046,42 @@
     text-decoration: underline;
   }
 
+
+  .hh-card {
+    margin-bottom: 18px;
+    padding: 14px 16px;
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.02);
+  }
+  .hh-card h3 { margin: 0 0 4px; font-size: 14px; }
+  .hh-status { margin: 8px 0 4px; }
+  .hh-participants {
+    margin: 10px 0;
+    padding: 10px 12px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+  }
+  .hh-participants legend { font-size: 12px; color: var(--sub); padding: 0 4px; }
+  .hh-check { display: flex; align-items: center; gap: 8px; font-size: 13px; margin: 4px 0; }
+  .hh-form { margin-top: 10px; }
+
+  /* The addon URL is a bearer credential; these lines must read as a warning, not as a hint. */
+  .addon-warn {
+    margin: 8px 0 0;
+    padding: 8px 10px;
+    border-radius: 8px;
+    font-size: 12px;
+    font-weight: 600;
+    color: #ffb27a;
+    background: rgba(255, 160, 92, 0.10);
+    border: 1px solid rgba(255, 160, 92, 0.28);
+  }
+  .addon-url-row { flex-direction: row; align-items: center; margin-top: 12px; }
+  .addon-url { flex: 1; min-width: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+  .addon-copy { flex: 0 0 auto; }
+  .addon-copy.copied {
+    border-color: color-mix(in srgb, var(--accent) 60%, transparent);
+    color: var(--accent);
+  }
 </style>

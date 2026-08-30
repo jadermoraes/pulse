@@ -1,13 +1,12 @@
 import { test, expect } from '@playwright/test';
 
 /**
- * The Trakt connection panel on My Account, hermetic + deterministic.
+ * The watchlist view on /app/requests, hermetic + deterministic.
  *
- * Trakt's backend endpoints are already covered by their own tests; this spec only checks the
- * panel wiring, so the network is mocked at the route level (page.route) rather than driving the
- * real Trakt HTTP calls. An admin seeds connections + a role + invite, a consumer onboards (fake
- * provision) and logs in, then we intercept /api/app/trakt on that consumer's page before
- * visiting /app/account.
+ * The watchlist API is covered by its own server-side tests; this spec only checks the view
+ * wiring, so /api/app/watchlist is mocked at the route level. An admin seeds connections + a
+ * role + invite, a consumer onboards (fake provision) and logs in, then we intercept the
+ * watchlist + detail endpoints on that consumer's page.
  */
 
 async function setupAndLogin(page: import('@playwright/test').Page) {
@@ -48,7 +47,13 @@ async function newConsumer(
   const roleId = (
     await page.request
       .post('/api/roles', {
-        data: { name: `Role-${username}`, allowList: ['discover', 'request', 'status'], monthlyTokenCap: null, autoApprove: false, seerrQuota: {} }
+        data: {
+          name: `Role-${username}`,
+          allowList: ['discover', 'request', 'status', 'watchlist'],
+          monthlyTokenCap: null,
+          autoApprove: false,
+          seerrQuota: {}
+        }
       })
       .then((r) => r.json())
   ).id;
@@ -72,60 +77,41 @@ async function newConsumer(
   return { consumer, cp };
 }
 
-test('Trakt: not configured shows the notice and no Connect button', async ({ page, browser }) => {
+test('watchlist view lists saved titles and removing one confirms first', async ({ page, browser }) => {
   await setupAndLogin(page);
   await ensureConnections(page);
-  const { consumer, cp } = await newConsumer(browser, page, 'trakt1');
+  const { consumer, cp } = await newConsumer(browser, page, 'watch1');
   try {
-    await cp.route('**/api/app/trakt', (route) =>
-      route.fulfill({ json: { configured: false, linked: false, enabled: false, lastSyncAt: null, lastError: null } })
-    );
-
-    await cp.goto('/app/account');
-    await expect(cp.getByText('Trakt is not set up on this server.')).toBeVisible();
-    await expect(cp.getByRole('button', { name: 'Connect Trakt' })).toHaveCount(0);
-  } finally {
-    await consumer.close();
-  }
-});
-
-test('Trakt: device flow shows the user code, then a poll returning ok switches to Connected', async ({ page, browser }) => {
-  await setupAndLogin(page);
-  await ensureConnections(page);
-  const { consumer, cp } = await newConsumer(browser, page, 'trakt2');
-  try {
-    let linked = false;
-    let pollCount = 0;
-    await cp.route('**/api/app/trakt', async (route) => {
-      const req = route.request();
-      if (req.method() === 'GET') {
-        await route.fulfill({ json: { configured: true, linked, enabled: linked, lastSyncAt: null, lastError: null } });
-        return;
+    // Newest first, exactly as the server returns it — the view must not re-sort.
+    let rows = [
+      { id: 1, tmdbId: 278, mediaType: 'movie', title: 'Shawshank', onServer: false, notifyOnAvailable: true, addedAt: 2 },
+      { id: 2, tmdbId: 238, mediaType: 'movie', title: 'Godfather', onServer: true, notifyOnAvailable: false, addedAt: 1 }
+    ];
+    await cp.route('**/api/app/watchlist', async (route) => {
+      if (route.request().method() === 'DELETE') {
+        // Pin the whole body: the handler coerces any non-'tv' mediaType to 'movie', so a client
+        // that sent the wrong field name (or none) would silently misroute a series removal.
+        expect(JSON.parse(route.request().postData()!)).toEqual({ tmdbId: 278, mediaType: 'movie' });
+        const tmdbId = JSON.parse(route.request().postData() ?? '{}').tmdbId;
+        rows = rows.filter((r) => r.tmdbId !== tmdbId);
+        return route.fulfill({ json: { ok: true, household: true } });
       }
-      if (req.method() === 'POST') {
-        const body = req.postDataJSON();
-        if (body.action === 'start') {
-          await route.fulfill({
-            json: { deviceCode: 'dc123', userCode: 'ABCD-1234', verificationUrl: 'https://trakt.tv/activate', interval: 1 }
-          });
-          return;
-        }
-        if (body.action === 'poll') {
-          pollCount++;
-          linked = true;
-          await route.fulfill({ json: { status: 'ok' } });
-          return;
-        }
-      }
-      await route.continue();
+      return route.fulfill({ json: rows });
     });
+    await cp.route('**/api/app/detail*', (route) => route.fulfill({ json: {} }));
 
-    await cp.goto('/app/account');
-    await cp.getByRole('button', { name: 'Connect Trakt' }).click();
+    await cp.goto('/app/requests');
+    await cp.getByRole('tab', { name: 'Watchlist' }).click();
+    await expect(cp.getByText('Shawshank')).toBeVisible();
+    await expect(cp.getByText('Godfather')).toBeVisible();
 
-    await expect(cp.getByText('ABCD-1234')).toBeVisible();
-    await expect(cp.getByText('Connected', { exact: true })).toBeVisible({ timeout: 10000 });
-    expect(pollCount).toBeGreaterThan(0);
+    // First click asks; the row is still there.
+    await cp.getByRole('button', { name: 'Remove', exact: true }).first().click();
+    await expect(cp.getByText('Shawshank')).toBeVisible();
+    // Confirming removes it.
+    await cp.getByRole('button', { name: 'Remove for everyone?' }).click();
+    await expect(cp.getByText('Shawshank')).toHaveCount(0);
+    await expect(cp.getByText('Godfather')).toBeVisible();
   } finally {
     await consumer.close();
   }

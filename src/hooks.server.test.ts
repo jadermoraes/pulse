@@ -8,6 +8,10 @@ import { createAdmin } from '$lib/server/auth';
 
 const PUBLIC_HOST = 'app.example.com';
 
+// A well-formed Stremio addon token. `handle` never inspects it (the dispatcher owns its own
+// auth); it is here so the path under test is the real shape a TV requests.
+const ADDON_TOKEN = 'a'.repeat(48);
+
 // Marker returned by our fake `resolve` so we can tell "fell through to the app" apart from
 // the guard's own Response/redirect/error.
 const RESOLVED = new Response('resolved-ok', { status: 200, headers: { 'x-resolved': '1' } });
@@ -141,6 +145,17 @@ describe('host guard — public host (PULSE_PUBLIC_HOST set)', () => {
     expect(r.kind).toBe('resolved');
   });
 
+  it('CRITICAL: the addon is invisible on the public host', async () => {
+    // The addon serves the entire Jellyfin library — catalogue, byte-streaming of every item and
+    // the Seerr request action — from a URL with NO auth gate in front of it. The only thing
+    // keeping it off the internet is that `/api/_public` is absent from `isPublicHostAllowed`.
+    // Adding it there would publish the whole library through the PULSE_PUBLIC_HOST tunnel, and
+    // every other test in the suite would stay green.
+    const r = await run(makeEvent({ path: `/api/_public/addon/${ADDON_TOKEN}/manifest.json`, host: PUBLIC_HOST }));
+    expect(r.kind).toBe('response');
+    expect((r as any).res.status).toBe(404);
+  });
+
   it('matches host case-insensitively and ignores port', async () => {
     const r = await run(makeEvent({ path: '/settings', host: 'APP.EXAMPLE.COM:443' }));
     expect(r.kind).toBe('response');
@@ -169,6 +184,15 @@ describe('host guard — LAN host (admin reachable, unchanged)', () => {
   it('/login on LAN host → reachable (public admin page)', async () => {
     const r = await run(makeEvent({ path: '/login', host: 'localhost' }));
     expect(r.kind).toBe('resolved');
+  });
+
+  it('CRITICAL: the addon reaches its handler on the LAN with no session', async () => {
+    // The mirror image of the public-host test: `/api/_public` must stay exempt from the admin
+    // API gate. Stremio sends no cookie at all, so dropping the exemption 401s the addon dead in
+    // production for everyone — with the rest of the suite still green.
+    const r = await run(makeEvent({ path: `/api/_public/addon/${ADDON_TOKEN}/manifest.json`, host: 'localhost' }));
+    expect((r as any).status).not.toBe(401);
+    expect(r.kind).toBe('resolved'); // reached the dispatcher, which owns its own auth
   });
 });
 

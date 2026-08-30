@@ -36,3 +36,7 @@ CLAUDE.md
 AGENTS.md
 .claude/
 .cursor/
+
+# Superpowers worktrees + SDD scratch
+/.worktrees
+/.superpowers

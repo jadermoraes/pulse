@@ -282,6 +282,32 @@ describe('buildToolSpecs', () => {
     expect((await list.run(ctx, {}) as any).items).toHaveLength(0);
   });
 
+  it('watchlistRemove is household-aware: it clears every participant and queues one tombstone', async () => {
+    // Same semantics as DELETE /api/app/watchlist — both surfaces call removeWatchlistEverywhere,
+    // so the chat tool can no longer drop only the caller's row and let the next poll re-import it.
+    const { createRole } = await import('../identity/roles');
+    const { createConsumer } = await import('../identity/consumers');
+    const { addWatchlist, listWatchlist } = await import('../consumer/watchlist');
+    const { saveStremioConnection, setParticipants } = await import('../consumer/household-stremio');
+    const { listHouseholdRemovals } = await import('../consumer/household-removals');
+    const roleId = createRole(db, { name: 'HH', allowList: ['watchlist'], monthlyTokenCap: 1000, autoApprove: true, seerrQuota: {} });
+    const a = createConsumer(db, { roleId, displayName: 'Jader', language: 'en' });
+    const b = createConsumer(db, { roleId, displayName: 'Jessica', language: 'en' });
+    for (const id of [a, b]) {
+      addWatchlist(db, { consumerId: id, tmdbId: 278, mediaType: 'movie', title: 'Shawshank', onServer: false, notifyOnAvailable: false });
+    }
+    saveStremioConnection(db, { email: 'tv@home.lan', authKey: 'ak' });
+    setParticipants(db, [a, b]);
+
+    const hctx = { db, consumer: { id: a, roleId }, channel: 'web', conversationId: 1 } as any;
+    const specs = await buildToolSpecs(hctx);
+    const out: any = await specs.find((s) => s.name === 'watchlistRemove')!.run(hctx, { tmdbId: 278, mediaType: 'movie' });
+    expect(out).toMatchObject({ ok: true, household: true });
+    expect(listWatchlist(db, a)).toEqual([]);
+    expect(listWatchlist(db, b)).toEqual([]);
+    expect(listHouseholdRemovals(db)).toHaveLength(1);
+  });
+
   it('cancelRequest is consumer-only and refuses when the consumer has no seerr account', async () => {
     const { createRole } = await import('../identity/roles');
     const { createConsumer } = await import('../identity/consumers');
