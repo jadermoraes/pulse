@@ -129,9 +129,9 @@ it('is unlinked until saveStremioConnection runs', () => {
 });
 
 it('stores the authKey and email, never a password, and starts with no participants', () => {
-  saveStremioConnection(db, { email: 'tv@home.lan', authKey: 'ak-1' });
+  saveStremioConnection(db, { email: 'fixture-account@example.invalid', authKey: 'ak-1' });
   const h = readHousehold(db)!;
-  expect(h.email).toBe('tv@home.lan');
+  expect(h.email).toBe('fixture-account@example.invalid');
   expect(h.connection.secret).toBe('ak-1');
   expect(h.participantIds).toEqual([]);
   expect(h.connection.enabled).toBe(true);
@@ -142,19 +142,19 @@ it('stores the authKey and email, never a password, and starts with no participa
 });
 
 it('a relink keeps the existing participant list', () => {
-  saveStremioConnection(db, { email: 'tv@home.lan', authKey: 'ak-1' });
+  saveStremioConnection(db, { email: 'fixture-account@example.invalid', authKey: 'ak-1' });
   setParticipants(db, [a, b]);
-  saveStremioConnection(db, { email: 'tv@home.lan', authKey: 'ak-2' });
+  saveStremioConnection(db, { email: 'fixture-account@example.invalid', authKey: 'ak-2' });
   const h = readHousehold(db)!;
   expect(h.connection.secret).toBe('ak-2');
   expect(h.participantIds).toEqual([a, b]);
 });
 
 it('a relink re-enables a connection that failure had disabled, and clears its error', () => {
-  saveStremioConnection(db, { email: 'tv@home.lan', authKey: 'ak-1' });
+  saveStremioConnection(db, { email: 'fixture-account@example.invalid', authKey: 'ak-1' });
   for (let i = 0; i < MAX_FAILS; i++) recordHouseholdFailure(db, 'Invalid auth');
   expect(getStremioConnection(db)!.enabled).toBe(false);
-  saveStremioConnection(db, { email: 'tv@home.lan', authKey: 'ak-2' });
+  saveStremioConnection(db, { email: 'fixture-account@example.invalid', authKey: 'ak-2' });
   const h = readHousehold(db)!;
   expect(h.connection.enabled).toBe(true);
   expect(h.failCount).toBe(0);
@@ -162,7 +162,7 @@ it('a relink re-enables a connection that failure had disabled, and clears its e
 });
 
 it('skips a participant id whose consumer has since been deleted', () => {
-  saveStremioConnection(db, { email: 'tv@home.lan', authKey: 'ak' });
+  saveStremioConnection(db, { email: 'fixture-account@example.invalid', authKey: 'ak' });
   setParticipants(db, [a, b, 9999]);
   db.prepare('DELETE FROM consumer_users WHERE id=?').run(b);
   // 9999 never existed; b existed and is gone. Both are dropped, and nothing throws.
@@ -170,7 +170,7 @@ it('skips a participant id whose consumer has since been deleted', () => {
 });
 
 it('ignores a participantIds blob that is not an array of integers', () => {
-  saveStremioConnection(db, { email: 'tv@home.lan', authKey: 'ak' });
+  saveStremioConnection(db, { email: 'fixture-account@example.invalid', authKey: 'ak' });
   const conn = getStremioConnection(db)!;
   expect(participantIds(db, { ...conn, options: { participantIds: 'all' } })).toEqual([]);
   expect(participantIds(db, { ...conn, options: {} })).toEqual([]);
@@ -178,7 +178,7 @@ it('ignores a participantIds blob that is not an array of integers', () => {
 });
 
 it('recordHouseholdSuccess stamps lastSyncAt and clears the error and fail count', () => {
-  saveStremioConnection(db, { email: 'tv@home.lan', authKey: 'ak' });
+  saveStremioConnection(db, { email: 'fixture-account@example.invalid', authKey: 'ak' });
   recordHouseholdFailure(db, 'boom');
   recordHouseholdSuccess(db);
   const h = readHousehold(db)!;
@@ -188,7 +188,7 @@ it('recordHouseholdSuccess stamps lastSyncAt and clears the error and fail count
 });
 
 it('recordHouseholdNote leaves a message without counting toward MAX_FAILS', () => {
-  saveStremioConnection(db, { email: 'tv@home.lan', authKey: 'ak' });
+  saveStremioConnection(db, { email: 'fixture-account@example.invalid', authKey: 'ak' });
   for (let i = 0; i < MAX_FAILS + 3; i++) recordHouseholdNote(db, 'Stremio HTTP 503');
   const h = readHousehold(db)!;
   expect(h.lastError).toBe('Stremio HTTP 503');
@@ -197,7 +197,7 @@ it('recordHouseholdNote leaves a message without counting toward MAX_FAILS', () 
 });
 
 it('recordHouseholdFailure disables only on the MAX_FAILS-th failure', () => {
-  saveStremioConnection(db, { email: 'tv@home.lan', authKey: 'ak' });
+  saveStremioConnection(db, { email: 'fixture-account@example.invalid', authKey: 'ak' });
   for (let i = 0; i < MAX_FAILS - 1; i++) recordHouseholdFailure(db, 'Invalid auth');
   expect(getStremioConnection(db)!.enabled).toBe(true);
   expect(readHousehold(db)!.failCount).toBe(MAX_FAILS - 1);
@@ -206,13 +206,13 @@ it('recordHouseholdFailure disables only on the MAX_FAILS-th failure', () => {
 });
 
 it('health writes preserve the authKey rather than blanking it', () => {
-  saveStremioConnection(db, { email: 'tv@home.lan', authKey: 'ak-secret' });
+  saveStremioConnection(db, { email: 'fixture-account@example.invalid', authKey: 'ak-secret' });
   setParticipants(db, [a]);
   recordHouseholdNote(db, 'note');
   recordHouseholdSuccess(db);
   const h = readHousehold(db)!;
   expect(h.connection.secret).toBe('ak-secret');
-  expect(h.email).toBe('tv@home.lan');
+  expect(h.email).toBe('fixture-account@example.invalid');
   expect(h.participantIds).toEqual([a]);
 });
 
@@ -225,7 +225,7 @@ it('the health helpers are no-ops when nothing is linked', () => {
 });
 
 it('unlinkStremio removes the row entirely', () => {
-  saveStremioConnection(db, { email: 'tv@home.lan', authKey: 'ak' });
+  saveStremioConnection(db, { email: 'fixture-account@example.invalid', authKey: 'ak' });
   unlinkStremio(db);
   expect(getStremioConnection(db)).toBeNull();
 });
@@ -449,7 +449,7 @@ afterEach(() => { global.fetch = realFetch; vi.restoreAllMocks(); });
 
 /** Link the household account with `ids` as its participants. Replaces the old saveCredential. */
 function link(ids: number[], authKey = 'ak'): void {
-  saveStremioConnection(db, { email: 'tv@home.lan', authKey });
+  saveStremioConnection(db, { email: 'fixture-account@example.invalid', authKey });
   setParticipants(db, ids);
 }
 
@@ -1006,13 +1006,13 @@ it('never ships the authKey to the browser', async () => {
   // `readHousehold` returns the DECRYPTED authKey on `.connection.secret`. This endpoint must
   // project explicit fields and never spread the connection — returning `readHousehold(db)` whole
   // would hand the household credential to anything that can reach the admin page.
-  saveStremioConnection(db, { email: 'tv@home.lan', authKey: 'ak-super-secret' });
+  saveStremioConnection(db, { email: 'fixture-account@example.invalid', authKey: 'ak-super-secret' });
   const { GET } = await import('./+server');
   const res = await (GET as any)({ locals: admin });
   const raw = await res.text();
   expect(raw).not.toContain('ak-super-secret');
   expect(raw).not.toContain('secret');
-  expect(JSON.parse(raw).email).toBe('tv@home.lan');
+  expect(JSON.parse(raw).email).toBe('fixture-account@example.invalid');
 });
 
 it('links with email + password, stores only the authKey, and never echoes the password', async () => {
@@ -1022,7 +1022,7 @@ it('links with email + password, stores only the authKey, and never echoes the p
   }) as any);
   const { POST } = await import('./+server');
   const res = await (POST as any)({
-    locals: admin, request: req({ email: 'tv@home.lan', password: 'hunter2' }),
+    locals: admin, request: req({ email: 'fixture-account@example.invalid', password: 'fixture-not-a-password' }),
     getClientAddress: () => '1.1.1.1'
   });
   expect(await res.json()).toEqual({ ok: true });
@@ -1030,9 +1030,9 @@ it('links with email + password, stores only the authKey, and never echoes the p
   expect(h.connection.secret).toBe('ak-live');
   // Falsifiable, unlike a check inside saveStremioConnection: the password IS in scope here, so
   // this fails if the handler ever persists it. Check the stored row too, not just the options.
-  expect(JSON.stringify(h.connection.options)).not.toContain('hunter2');
+  expect(JSON.stringify(h.connection.options)).not.toContain('fixture-not-a-password');
   const rawRow = db.prepare("SELECT * FROM connections WHERE type='stremio'").get() as any;
-  expect(JSON.stringify(rawRow)).not.toContain('hunter2');
+  expect(JSON.stringify(rawRow)).not.toContain('fixture-not-a-password');
 });
 
 it('maps a Stremio credential rejection to 400 and an outage to 502', async () => {
@@ -1040,12 +1040,12 @@ it('maps a Stremio credential rejection to 400 and an outage to 502', async () =
   global.fetch = (vi.fn(async () =>
     new Response(JSON.stringify({ error: { code: 1, message: 'Invalid password' } }), { status: 200 })) as any);
   await expect((POST as any)({
-    locals: admin, request: req({ email: 'e@x', password: 'bad' }), getClientAddress: () => '1.1.1.1'
+    locals: admin, request: req({ email: 'fixture@example.invalid', password: 'bad' }), getClientAddress: () => '1.1.1.1'
   })).rejects.toMatchObject({ status: 400 });
 
   global.fetch = (vi.fn(async () => { throw new TypeError('fetch failed'); }) as any);
   await expect((POST as any)({
-    locals: admin, request: req({ email: 'e@x', password: 'p' }), getClientAddress: () => '1.1.1.1'
+    locals: admin, request: req({ email: 'fixture@example.invalid', password: 'p' }), getClientAddress: () => '1.1.1.1'
   })).rejects.toMatchObject({ status: 502 });
   expect(readHousehold(db)).toBeNull();
 });
@@ -1062,14 +1062,14 @@ it('rate-limits the login endpoint', async () => {
     new Response(JSON.stringify({ result: { authKey: 'ak' } }), { status: 200 })) as any);
   const { POST } = await import('./+server');
   const call = () => (POST as any)({
-    locals: admin, request: req({ email: 'e@x', password: 'p' }), getClientAddress: () => '9.9.9.9'
+    locals: admin, request: req({ email: 'fixture@example.invalid', password: 'p' }), getClientAddress: () => '9.9.9.9'
   });
   for (let i = 0; i < 5; i++) await call();
   await expect(call()).rejects.toMatchObject({ status: 429 });
 });
 
 it('sets participants, dropping ids that are not real consumers', async () => {
-  saveStremioConnection(db, { email: 'e@x', authKey: 'ak' });
+  saveStremioConnection(db, { email: 'fixture@example.invalid', authKey: 'ak' });
   const { PATCH } = await import('./+server');
   const res = await (PATCH as any)({ locals: admin, request: req({ participantIds: [a, 9999, 'x'] }) });
   expect((await res.json()).participantIds).toEqual([a]);
@@ -1077,7 +1077,7 @@ it('sets participants, dropping ids that are not real consumers', async () => {
 });
 
 it('accepts an empty participant list', async () => {
-  saveStremioConnection(db, { email: 'e@x', authKey: 'ak' });
+  saveStremioConnection(db, { email: 'fixture@example.invalid', authKey: 'ak' });
   setParticipants(db, [a, b]);
   const { PATCH } = await import('./+server');
   await (PATCH as any)({ locals: admin, request: req({ participantIds: [] }) });
@@ -1085,21 +1085,21 @@ it('accepts an empty participant list', async () => {
 });
 
 it('rejects a PATCH whose body is not a participantIds array', async () => {
-  saveStremioConnection(db, { email: 'e@x', authKey: 'ak' });
+  saveStremioConnection(db, { email: 'fixture@example.invalid', authKey: 'ak' });
   const { PATCH } = await import('./+server');
   await expect((PATCH as any)({ locals: admin, request: req({ participantIds: 'all' }) }))
     .rejects.toMatchObject({ status: 400 });
 });
 
 it('unlinks', async () => {
-  saveStremioConnection(db, { email: 'e@x', authKey: 'ak' });
+  saveStremioConnection(db, { email: 'fixture@example.invalid', authKey: 'ak' });
   const { DELETE } = await import('./+server');
   await (DELETE as any)({ locals: admin });
   expect(readHousehold(db)).toBeNull();
 });
 
 it('the test endpoint reports how many items the live Library returns', async () => {
-  saveStremioConnection(db, { email: 'e@x', authKey: 'ak' });
+  saveStremioConnection(db, { email: 'fixture@example.invalid', authKey: 'ak' });
   global.fetch = (vi.fn(async () => new Response(JSON.stringify({
     result: [
       { _id: 'tt1', name: 'A', type: 'movie', removed: false },
@@ -1112,7 +1112,7 @@ it('the test endpoint reports how many items the live Library returns', async ()
 });
 
 it('the test endpoint reports a failure rather than throwing', async () => {
-  saveStremioConnection(db, { email: 'e@x', authKey: 'ak' });
+  saveStremioConnection(db, { email: 'fixture@example.invalid', authKey: 'ak' });
   global.fetch = (vi.fn(async () => new Response('no', { status: 401 })) as any);
   const { POST } = await import('./test/+server');
   const body = await (await (POST as any)({ locals: admin })).json();
@@ -1643,7 +1643,7 @@ test('admin links Stremio, picks participants, and unlinks', async ({ browser })
     if (m === 'GET') {
       return route.fulfill({
         json: {
-          linked, enabled: true, email: linked ? 'tv@home.lan' : '',
+          linked, enabled: true, email: linked ? 'fixture-account@example.invalid' : '',
           participantIds: participants, lastSyncAt: null, lastError: null,
           consumers: [{ id: 2, displayName: 'Jader' }, { id: 3, displayName: 'Jessica' }]
         }
@@ -1661,8 +1661,8 @@ test('admin links Stremio, picks participants, and unlinks', async ({ browser })
   // <login as admin exactly as e2e/connections.spec.ts does, then:>
   await page.goto('/settings#connections');
 
-  await page.getByLabel('Stremio email').fill('tv@home.lan');
-  await page.getByLabel('Stremio password').fill('hunter2');
+  await page.getByLabel('Stremio email').fill('fixture-account@example.invalid');
+  await page.getByLabel('Stremio password').fill('fixture-not-a-password');
   await page.getByRole('button', { name: 'Link Stremio' }).click();
   await expect(page.getByText('Linked as tv@home.lan')).toBeVisible();
 

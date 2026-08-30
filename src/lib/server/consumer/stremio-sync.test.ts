@@ -30,7 +30,7 @@ afterEach(() => { global.fetch = realFetch; vi.restoreAllMocks(); });
 
 /** Link the household account with `ids` as its participants. Replaces the old saveCredential. */
 function link(ids: number[], authKey = 'ak'): void {
-  saveStremioConnection(db, { email: 'tv@home.lan', authKey });
+  saveStremioConnection(db, { email: 'fixture-account@example.invalid', authKey });
   setParticipants(db, ids);
 }
 

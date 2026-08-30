@@ -35,9 +35,9 @@ it('is unlinked until saveStremioConnection runs', () => {
 });
 
 it('stores the authKey and email, never a password, and starts with no participants', () => {
-  saveStremioConnection(db, { email: 'tv@home.lan', authKey: 'ak-1' });
+  saveStremioConnection(db, { email: 'fixture-account@example.invalid', authKey: 'ak-1' });
   const h = readHousehold(db)!;
-  expect(h.email).toBe('tv@home.lan');
+  expect(h.email).toBe('fixture-account@example.invalid');
   expect(h.connection.secret).toBe('ak-1');
   expect(h.participantIds).toEqual([]);
   expect(h.connection.enabled).toBe(true);
@@ -47,19 +47,19 @@ it('stores the authKey and email, never a password, and starts with no participa
 });
 
 it('a relink keeps the existing participant list', () => {
-  saveStremioConnection(db, { email: 'tv@home.lan', authKey: 'ak-1' });
+  saveStremioConnection(db, { email: 'fixture-account@example.invalid', authKey: 'ak-1' });
   setParticipants(db, [a, b]);
-  saveStremioConnection(db, { email: 'tv@home.lan', authKey: 'ak-2' });
+  saveStremioConnection(db, { email: 'fixture-account@example.invalid', authKey: 'ak-2' });
   const h = readHousehold(db)!;
   expect(h.connection.secret).toBe('ak-2');
   expect(h.participantIds).toEqual([a, b]);
 });
 
 it('a relink re-enables a connection that failure had disabled, and clears its error', () => {
-  saveStremioConnection(db, { email: 'tv@home.lan', authKey: 'ak-1' });
+  saveStremioConnection(db, { email: 'fixture-account@example.invalid', authKey: 'ak-1' });
   for (let i = 0; i < MAX_FAILS; i++) recordHouseholdFailure(db, 'Invalid auth');
   expect(getStremioConnection(db)!.enabled).toBe(false);
-  saveStremioConnection(db, { email: 'tv@home.lan', authKey: 'ak-2' });
+  saveStremioConnection(db, { email: 'fixture-account@example.invalid', authKey: 'ak-2' });
   const h = readHousehold(db)!;
   expect(h.connection.enabled).toBe(true);
   expect(h.failCount).toBe(0);
@@ -67,7 +67,7 @@ it('a relink re-enables a connection that failure had disabled, and clears its e
 });
 
 it('skips a participant id whose consumer has since been deleted', () => {
-  saveStremioConnection(db, { email: 'tv@home.lan', authKey: 'ak' });
+  saveStremioConnection(db, { email: 'fixture-account@example.invalid', authKey: 'ak' });
   setParticipants(db, [a, b, 9999]);
   db.prepare('DELETE FROM consumer_users WHERE id=?').run(b);
   // 9999 never existed; b existed and is gone. Both are dropped, and nothing throws.
@@ -75,7 +75,7 @@ it('skips a participant id whose consumer has since been deleted', () => {
 });
 
 it('ignores a participantIds blob that is not an array of integers', () => {
-  saveStremioConnection(db, { email: 'tv@home.lan', authKey: 'ak' });
+  saveStremioConnection(db, { email: 'fixture-account@example.invalid', authKey: 'ak' });
   const conn = getStremioConnection(db)!;
   expect(participantIds(db, { ...conn, options: { participantIds: 'all' } })).toEqual([]);
   expect(participantIds(db, { ...conn, options: {} })).toEqual([]);
@@ -83,13 +83,13 @@ it('ignores a participantIds blob that is not an array of integers', () => {
 });
 
 it('setParticipants filters and dedupes on the way in', () => {
-  saveStremioConnection(db, { email: 'tv@home.lan', authKey: 'ak' });
+  saveStremioConnection(db, { email: 'fixture-account@example.invalid', authKey: 'ak' });
   setParticipants(db, [a, a, 'x' as any, 2.5 as any]);
   expect(participantIds(db, getStremioConnection(db)!)).toEqual([a]);
 });
 
 it('recordHouseholdSuccess stamps lastSyncAt and clears the error and fail count', () => {
-  saveStremioConnection(db, { email: 'tv@home.lan', authKey: 'ak' });
+  saveStremioConnection(db, { email: 'fixture-account@example.invalid', authKey: 'ak' });
   recordHouseholdFailure(db, 'boom');
   recordHouseholdSuccess(db);
   const h = readHousehold(db)!;
@@ -99,7 +99,7 @@ it('recordHouseholdSuccess stamps lastSyncAt and clears the error and fail count
 });
 
 it('recordHouseholdNote leaves a message without counting toward MAX_FAILS', () => {
-  saveStremioConnection(db, { email: 'tv@home.lan', authKey: 'ak' });
+  saveStremioConnection(db, { email: 'fixture-account@example.invalid', authKey: 'ak' });
   for (let i = 0; i < MAX_FAILS + 3; i++) recordHouseholdNote(db, 'Stremio HTTP 503');
   const h = readHousehold(db)!;
   expect(h.lastError).toBe('Stremio HTTP 503');
@@ -108,7 +108,7 @@ it('recordHouseholdNote leaves a message without counting toward MAX_FAILS', () 
 });
 
 it('recordHouseholdFailure disables only on the MAX_FAILS-th failure', () => {
-  saveStremioConnection(db, { email: 'tv@home.lan', authKey: 'ak' });
+  saveStremioConnection(db, { email: 'fixture-account@example.invalid', authKey: 'ak' });
   for (let i = 0; i < MAX_FAILS - 1; i++) recordHouseholdFailure(db, 'Invalid auth');
   expect(getStremioConnection(db)!.enabled).toBe(true);
   expect(readHousehold(db)!.failCount).toBe(MAX_FAILS - 1);
@@ -117,13 +117,13 @@ it('recordHouseholdFailure disables only on the MAX_FAILS-th failure', () => {
 });
 
 it('health writes preserve the authKey rather than blanking it', () => {
-  saveStremioConnection(db, { email: 'tv@home.lan', authKey: 'ak-secret' });
+  saveStremioConnection(db, { email: 'fixture-account@example.invalid', authKey: 'ak-secret' });
   setParticipants(db, [a]);
   recordHouseholdNote(db, 'note');
   recordHouseholdSuccess(db);
   const h = readHousehold(db)!;
   expect(h.connection.secret).toBe('ak-secret');
-  expect(h.email).toBe('tv@home.lan');
+  expect(h.email).toBe('fixture-account@example.invalid');
   expect(h.participantIds).toEqual([a]);
 });
 
@@ -136,7 +136,7 @@ it('the health helpers are no-ops when nothing is linked', () => {
 });
 
 it('unlinkStremio removes the row entirely', () => {
-  saveStremioConnection(db, { email: 'tv@home.lan', authKey: 'ak' });
+  saveStremioConnection(db, { email: 'fixture-account@example.invalid', authKey: 'ak' });
   unlinkStremio(db);
   expect(getStremioConnection(db)).toBeNull();
 });

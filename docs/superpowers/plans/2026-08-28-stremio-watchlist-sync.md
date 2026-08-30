@@ -283,20 +283,20 @@ const ITEM = {
 
 it('login returns the authKey and posts the documented body', async () => {
   const spy = mockJson(200, { result: { authKey: 'ak-123' } });
-  expect(await stremioLogin('a@b.c', 'pw')).toBe('ak-123');
+  expect(await stremioLogin('fixture@example.invalid', 'pw')).toBe('ak-123');
   const [url, init] = spy.mock.calls[0] as any;
   expect(url).toBe('https://api.strem.io/api/login');
-  expect(JSON.parse(init.body)).toEqual({ email: 'a@b.c', password: 'pw', type: 'Login' });
+  expect(JSON.parse(init.body)).toEqual({ email: 'fixture@example.invalid', password: 'pw', type: 'Login' });
 });
 
 it('login surfaces an error carried INSIDE a 200 body', async () => {
   mockJson(200, { error: { code: 2, message: 'User not found', wrongEmail: true } });
-  await expect(stremioLogin('a@b.c', 'pw')).rejects.toBeInstanceOf(StremioError);
+  await expect(stremioLogin('fixture@example.invalid', 'pw')).rejects.toBeInstanceOf(StremioError);
 });
 
 it('login never puts the password in the thrown message', async () => {
   mockJson(200, { error: { code: 2, message: 'User not found' } });
-  await expect(stremioLogin('a@b.c', 'hunter2')).rejects.toThrow(/^(?!.*hunter2).*$/s);
+  await expect(stremioLogin('fixture@example.invalid', 'fixture-not-a-password')).rejects.toThrow(/^(?!.*hunter2).*$/s);
 });
 
 it('datastoreGet returns the library array', async () => {
@@ -514,14 +514,14 @@ it('a successful login stores the authKey encrypted and never the password', asy
   const { POST } = await handlers();
   const res = await POST({
     locals: { consumer: { id: consumerId } },
-    request: new Request('http://x', { method: 'POST', body: JSON.stringify({ email: 'a@b.c', password: 'hunter2' }) })
+    request: new Request('http://x', { method: 'POST', body: JSON.stringify({ email: 'fixture@example.invalid', password: 'fixture-not-a-password' }) })
   } as any);
   expect(await res.json()).toMatchObject({ ok: true });
   expect(getCredential(db, consumerId, 'stremio')?.secret).toBe('ak-1');
   const raw = db.prepare('SELECT secret FROM spoke_credentials WHERE consumer_id=?').get(consumerId) as any;
   expect(raw.secret).not.toBe('ak-1');
   const dump = JSON.stringify(db.prepare('SELECT * FROM spoke_credentials').all());
-  expect(dump).not.toContain('hunter2');
+  expect(dump).not.toContain('fixture-not-a-password');
 });
 
 it('a bad login is reported without storing anything', async () => {
@@ -531,7 +531,7 @@ it('a bad login is reported without storing anything', async () => {
   const { POST } = await handlers();
   await expect(POST({
     locals: { consumer: { id: consumerId } },
-    request: new Request('http://x', { method: 'POST', body: JSON.stringify({ email: 'a@b.c', password: 'x' }) })
+    request: new Request('http://x', { method: 'POST', body: JSON.stringify({ email: 'fixture@example.invalid', password: 'x' }) })
   } as any)).rejects.toMatchObject({ status: 400 });
   expect(getCredential(db, consumerId, 'stremio')).toBeNull();
 });
