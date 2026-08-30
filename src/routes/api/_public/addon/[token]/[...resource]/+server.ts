@@ -39,15 +39,32 @@ const JF_ID_RE = /^[A-Za-z0-9-]{1,64}$/;
 /** Image tags are hex digests; the poster tag is concatenated into a query string unencoded. */
 const JF_TAG_RE = /^[A-Za-z0-9]{1,64}$/;
 
+/**
+ * Stremio fetches an addon from its own origin, so EVERY response here needs CORS or the browser
+ * discards it before the client ever sees it — the symptom is a bare "Failed to fetch" with a 200
+ * on the wire. `*` is correct rather than lax: the token in the path is the credential, and CORS
+ * is a same-origin-policy mechanism, not an authorisation one. A caller without the token gets a
+ * 404 whatever origin they claim.
+ */
+const CORS: Record<string, string> = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': '*',
+  'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS'
+};
+
 /** Everything unknown, unauthorised or unsupported answers the same way: 404, no body. */
 function notFound(): Response {
-  return new Response(null, { status: 404 });
+  return new Response(null, { status: 404, headers: { ...CORS } });
 }
 
 /** Stremio caches aggressively; a short TTL keeps a freshly-added title from being invisible. */
 function jsonRes(body: unknown): Response {
-  return json(body, { headers: { 'Cache-Control': 'public, max-age=60' } });
+  return json(body, { headers: { 'Cache-Control': 'public, max-age=60', ...CORS } });
 }
+
+/** Preflight. Without this the browser never issues the GET at all. */
+export const OPTIONS: RequestHandler = async () =>
+  new Response(null, { status: 204, headers: { ...CORS } });
 
 function jellyfinConn(db: ReturnType<typeof getDb>): Connection | null {
   return listConnections(db).find((c) => c.type === 'jellyfin' && c.enabled) ?? null;
@@ -188,6 +205,7 @@ export const GET: RequestHandler = async ({ params, url, request, getClientAddre
     // Do NOT invent Accept-Ranges. Upstream answering 200 to a Range request means it will not
     // seek; telling the player otherwise makes it retry a seek that cannot work.
     if (!headers.has('Accept-Ranges') && upstream.status === 206) headers.set('Accept-Ranges', 'bytes');
+    for (const [k, v] of Object.entries(CORS)) headers.set(k, v);
     return new Response(upstream.body, { status: upstream.status, headers });
   }
 
@@ -209,7 +227,8 @@ export const GET: RequestHandler = async ({ params, url, request, getClientAddre
       status: 200,
       headers: {
         'Content-Type': upstream.headers.get('Content-Type') ?? 'image/jpeg',
-        'Cache-Control': 'public, max-age=86400'
+        'Cache-Control': 'public, max-age=86400',
+        ...CORS
       }
     });
   }
@@ -272,7 +291,7 @@ export const GET: RequestHandler = async ({ params, url, request, getClientAddre
     // already serves this file at `/addon/requested.mp4` with the right type and Range support.
     return new Response(null, {
       status: 302,
-      headers: { Location: `${origin}/addon/requested.mp4` }
+      headers: { Location: `${origin}/addon/requested.mp4`, ...CORS }
     });
   }
 

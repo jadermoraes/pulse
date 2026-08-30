@@ -821,3 +821,34 @@ it('strips only a TRAILING .json — a search term containing ".json" survives i
   await (GET as any)(call(t, 'catalog/movie/pulse-movies/search=a.jsonx.json'));
   expect(urls[0]).toContain('SearchTerm=a.jsonx');
 });
+
+// --- CORS ---
+// Stremio fetches the addon from its own origin. Without these headers the browser discards the
+// response before the client sees it, and the user gets a bare "Failed to fetch" while the server
+// log shows a clean 200. This was missed entirely in the design and only surfaced on a real client.
+
+it('CRITICAL: every addon response carries Access-Control-Allow-Origin', async () => {
+  const t = mintAddonToken(db, { consumerId, label: 'TV' });
+  stubJf({ Items: [{ Id: 'jf-1', Name: 'S', ProviderIds: { Imdb: 'tt0111161' } }] });
+  const { GET } = await import('./+server');
+  for (const resource of ['manifest.json', 'catalog/movie/pulse-movies.json', 'stream/movie/tt0111161.json']) {
+    const res = await (GET as any)(call(t, resource));
+    expect(res.headers.get('access-control-allow-origin'), resource).toBe('*');
+  }
+});
+
+it('a rejected request still carries CORS, so the client sees the 404 rather than a fetch error', async () => {
+  const { GET } = await import('./+server');
+  const res = await (GET as any)(call('0'.repeat(48), 'manifest.json'));
+  expect(res.status).toBe(404);
+  expect(res.headers.get('access-control-allow-origin')).toBe('*');
+});
+
+it('answers the CORS preflight instead of 405ing it', async () => {
+  const { OPTIONS } = await import('./+server');
+  const res = await (OPTIONS as any)(call('whatever', 'manifest.json'));
+  // Without an OPTIONS handler SvelteKit answers 405 and the browser never issues the GET.
+  expect(res.status).toBe(204);
+  expect(res.headers.get('access-control-allow-origin')).toBe('*');
+  expect(res.headers.get('access-control-allow-methods')).toContain('GET');
+});
