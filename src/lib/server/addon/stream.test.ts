@@ -51,6 +51,10 @@ it('builds a play stream pointing at pulse, never at jellyfin', () => {
   // notWebReady because the proxy is plain http on the LAN and the container may not be mp4.
   expect(s.behaviorHints.notWebReady).toBe(true);
   expect(JSON.stringify(s)).not.toContain('api_key');
+  // Stremio renders `name` as the badge and `description` as the row's text. The title goes on
+  // its own line so the viewer can see WHICH title this row will play — the whole symptom of the
+  // lookup bug was a row confidently naming a film the viewer had not opened.
+  expect(s.description).toBe('\u25b6 Play from your library\nShawshank');
 });
 
 it('builds a request stream that names what it will do', () => {
@@ -59,4 +63,6 @@ it('builds a request stream that names what it will do', () => {
   expect(s.name).toBeTruthy();
   // The viewer's only signal is this text; it must say that selecting it requests the title.
   expect(String(s.description ?? s.title ?? '').toLowerCase()).toContain('request');
+  // Two lines: what selecting it does, then why it is offered at all.
+  expect(s.description).toBe('\uff0b Request on Pulse\nNot in your library — select to request it');
 });

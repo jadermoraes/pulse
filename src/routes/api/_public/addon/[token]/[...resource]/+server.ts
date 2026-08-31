@@ -124,7 +124,7 @@ export const GET: RequestHandler = async ({ params, url, request, getClientAddre
   const origin = url.origin;
 
   if (parts.length === 1 && parts[0] === 'manifest.json') {
-    return jsonRes(buildManifest());
+    return jsonRes(buildManifest(origin));
   }
 
   const conn = jellyfinConn(db);

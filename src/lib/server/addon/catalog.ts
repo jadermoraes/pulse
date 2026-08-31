@@ -8,13 +8,17 @@ const MAX_SKIP = 100000;
  * installed by default in every Stremio — serves the detail page for a `tt` id. Declaring `meta`
  * would make pulse responsible for season/episode metadata trees it models nowhere.
  */
-export function buildManifest(): Record<string, unknown> {
+export function buildManifest(origin: string): Record<string, unknown> {
   const extra = [{ name: 'search', isRequired: false }, { name: 'skip', isRequired: false }];
   return {
     id: 'com.pulse.jellyfin',
     version: '1.0.0',
     name: 'Pulse',
     description: 'Your Jellyfin library, and a way to ask pulse for what is missing.',
+    // The PWA's own icon, served by adapter-node straight out of build/client — the same origin
+    // the client just fetched this manifest from, so it needs no token and no CORS (an <img> is
+    // not a fetch). Absolute, because Stremio resolves it against its own page, not against us.
+    logo: `${origin}/icon-192.png`,
     resources: ['catalog', 'stream'],
     types: ['movie', 'series'],
     idPrefixes: ['tt'],

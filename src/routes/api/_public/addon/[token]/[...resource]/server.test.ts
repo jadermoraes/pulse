@@ -12,6 +12,7 @@
 import { it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { openDb, migrate, type DB } from '$lib/server/db';
 import { mintAddonToken, readAddonToken, revokeAddonToken } from '$lib/server/addon/tokens';
+import { _resetLibraryIndex } from '$lib/server/addon/jellyfin-library';
 import { createConnection } from '$lib/server/connections';
 import { _resetStore } from '$lib/server/ratelimit';
 import { __resetRequestLimitState } from '$lib/server/request-limit';
@@ -29,6 +30,11 @@ beforeEach(() => {
   // tests: the bad-token cases below would otherwise lock 10.0.0.5 out for every later test.
   _resetStore();
   __resetRequestLimitState();
+  // The Jellyfin library index is module-level and keyed on the connection, which every test
+  // here recreates with the same id and baseUrl. Without this, one test's stubbed library is
+  // still cached when the next one asks — and a test that passes off a neighbour's data is
+  // proving nothing.
+  _resetLibraryIndex();
   db = openDb(':memory:'); migrate(db);
   db.prepare('INSERT INTO roles(id,name,created_at) VALUES (2,?,?)').run('viewer', Date.now());
   consumerId = Number(db.prepare(

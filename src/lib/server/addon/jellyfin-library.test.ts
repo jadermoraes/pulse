@@ -1,6 +1,6 @@
 import { it, expect, afterEach, vi } from 'vitest';
 import {
-  listLibrary, findByImdb, findEpisode, upstreamStreamUrl, type LibraryItem
+  listLibrary, findByImdb, findEpisode, upstreamStreamUrl, _resetLibraryIndex, type LibraryItem
 } from './jellyfin-library';
 import type { Connection } from '../connections';
 
@@ -10,7 +10,9 @@ const conn = {
 } as Connection;
 
 const realFetch = global.fetch;
-afterEach(() => { global.fetch = realFetch; vi.restoreAllMocks(); });
+// The library index is process-global and keyed on the connection, which every test here shares.
+// Without this, one test's stubbed library answers the next test's lookup.
+afterEach(() => { global.fetch = realFetch; vi.restoreAllMocks(); _resetLibraryIndex(); });
 
 function stub(payload: unknown): string[] {
   const urls: string[] = [];
@@ -93,13 +95,80 @@ it('returns an empty list on a non-2xx even when the error body is valid JSON', 
   await expect(listLibrary(conn, { type: 'movie', skip: 0, limit: 10 })).resolves.toEqual([]);
 });
 
-it('finds a movie by imdb id in one call', async () => {
-  const urls = stub({ Items: [ITEM] });
+it('finds a movie by matching the imdb id locally, NOT by asking Jellyfin to filter', async () => {
+  const OTHER = { ...ITEM, Id: 'jf-9', Name: 'Affection', ProviderIds: { Imdb: 'tt33249097' } };
+  // Jellyfin 10.11 has no provider-id filter: it ignores one and returns the WHOLE library. This
+  // stub reproduces that exactly — every query answers with both titles, in library order.
+  const urls = stub({ Items: [OTHER, ITEM] });
   const out = await findByImdb(conn, 'tt0111161', 'movie');
-  expect(urls[0]).toContain('AnyProviderIdEquals=imdb.tt0111161');
-  expect(urls[0]).toContain('IncludeItemTypes=Movie');
+  // The bug this replaces took Items[0] and played 'Affection' for every title in the library.
   expect(out!.jellyfinId).toBe('jf-1');
+  expect(out!.name).toBe('Shawshank');
+  // No upstream filter is attempted: asking for one is what silently returned everything.
+  expect(urls.join('|')).not.toContain('AnyProviderIdEquals');
+  expect(urls[0]).toContain('IncludeItemTypes=Movie');
   expect(JSON.stringify(out)).not.toContain('KEY');
+});
+
+it('returns null for a title the library does not have, even though the query returns rows', async () => {
+  // The regression guard. Jellyfin answers a lookup for an unknown id with the full library; the
+  // old code called that a hit. Nothing missing ever looked missing, so the addon never offered
+  // to request anything.
+  stub({ Items: [{ ...ITEM, Id: 'jf-9', Name: 'Affection', ProviderIds: { Imdb: 'tt33249097' } }] });
+  expect(await findByImdb(conn, 'tt0111161', 'movie')).toBeNull();
+});
+
+it('pages through a library larger than one request', async () => {
+  const page1 = Array.from({ length: 200 }, (_, n) => ({
+    ...ITEM, Id: `p1-${n}`, Name: `Filler ${n}`, ProviderIds: { Imdb: `tt1${String(n).padStart(6, '0')}` }
+  }));
+  const urls: string[] = [];
+  global.fetch = (vi.fn(async (url: any) => {
+    urls.push(String(url));
+    const body = urls.length === 1 ? { Items: page1 } : { Items: [ITEM] };
+    return new Response(JSON.stringify(body), { status: 200 });
+  }) as any);
+  // Only reachable on the second page — a single-page index would miss it.
+  expect((await findByImdb(conn, 'tt0111161', 'movie'))!.jellyfinId).toBe('jf-1');
+  expect(urls.length).toBe(2);
+  expect(urls[0]).toContain('StartIndex=0');
+  expect(urls[1]).toContain('StartIndex=200');
+});
+
+it('serves repeat lookups from the index instead of re-fetching', async () => {
+  const urls = stub({ Items: [ITEM] });
+  await findByImdb(conn, 'tt0111161', 'movie');
+  await findByImdb(conn, 'tt0111161', 'movie');
+  await findByImdb(conn, 'tt0000000', 'movie');
+  expect(urls.length).toBe(1);
+});
+
+it('indexes movies and series separately', async () => {
+  // A series and a movie can share neither id nor index: asking for one must never answer from
+  // the other's library.
+  const urls = stub({ Items: [ITEM] });
+  await findByImdb(conn, 'tt0111161', 'movie');
+  await findByImdb(conn, 'tt0111161', 'series');
+  expect(urls.length).toBe(2);
+  expect(urls[0]).toContain('IncludeItemTypes=Movie');
+  expect(urls[1]).toContain('IncludeItemTypes=Series');
+});
+
+it('does not cache an index built from a failed fetch', async () => {
+  let call = 0;
+  global.fetch = (vi.fn(async () => {
+    call++;
+    if (call === 1) return new Response('nope', { status: 500 });
+    return new Response(JSON.stringify({ Items: [ITEM] }), { status: 200 });
+  }) as any);
+  // A blip must not turn into a minute of "you do not own this" for titles that are right there.
+  expect(await findByImdb(conn, 'tt0111161', 'movie')).toBeNull();
+  expect((await findByImdb(conn, 'tt0111161', 'movie'))!.jellyfinId).toBe('jf-1');
+});
+
+it('returns null rather than throwing when Jellyfin is unreachable', async () => {
+  global.fetch = (vi.fn(async () => { throw new TypeError('fetch failed'); }) as any);
+  await expect(findByImdb(conn, 'tt0111161', 'movie')).resolves.toBeNull();
 });
 
 it('returns null when the library does not have the title', async () => {

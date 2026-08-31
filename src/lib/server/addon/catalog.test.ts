@@ -8,7 +8,7 @@ const item: LibraryItem = {
 };
 
 it('the manifest declares catalog and stream but NOT meta', () => {
-  const m = buildManifest() as any;
+  const m = buildManifest('http://pulse.lan:8817') as any;
   // Omitting `meta` is deliberate: items are keyed by imdb id and Cinemeta, installed by default,
   // supplies the detail page. Declaring meta would make pulse responsible for season trees it
   // does not model.
@@ -25,6 +25,15 @@ it('the manifest declares catalog and stream but NOT meta', () => {
     const names = c.extra.map((e: any) => e.name).sort();
     expect(names).toEqual(['search', 'skip']);
   }
+});
+
+it('advertises an absolute logo url on the manifest origin, with no token in it', () => {
+  const m = buildManifest('http://pulse.lan:8817') as any;
+  // Stremio resolves the logo against its OWN page, so a relative path would 404 there.
+  expect(m.logo).toBe('http://pulse.lan:8817/icon-192.png');
+  // The logo is served by the static handler, not the addon route: it must not carry the
+  // credential that the rest of the addon's urls do.
+  expect(m.logo).not.toContain('/addon/');
 });
 
 it('parses extras from the path segment', () => {

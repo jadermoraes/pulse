@@ -24,7 +24,7 @@ export function buildPlayStream(
   return {
     url: `${origin}/api/_public/addon/${token}/play/${jellyfinItemId}`,
     name: 'Pulse',
-    description: `Play ${name} from your library`,
+    description: `\u25b6 Play from your library\n${name}`,
     behaviorHints: {
       // The proxy is plain http on the LAN and the container is whatever Jellyfin holds, so the
       // client must not assume a web-ready mp4 over https.
@@ -39,7 +39,7 @@ export function buildRequestStream(
   return {
     url: `${origin}/api/_public/addon/${token}/request/${type}/${id}`,
     name: 'Pulse',
-    description: 'Not in your library — select to request it on pulse',
+    description: '\uff0b Request on Pulse\nNot in your library — select to request it',
     behaviorHints: { notWebReady: true }
   };
 }
