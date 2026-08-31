@@ -33,13 +33,35 @@ export function buildPlayStream(
   };
 }
 
+/** The audio preference a request carries. The same two values the PWA's movie modal offers, so
+ *  a title requested from the TV and one requested from the phone mean the same thing. */
+export type RequestAudio = 'ptbr' | 'original';
+
+/** Stremio has no input widget of any kind — the stream list IS the picker, so every choice has
+ *  to be its own selectable row. Two is the whole vocabulary: more rows would bury the actual
+ *  play sources under a menu. */
+const AUDIO_LABEL: Record<RequestAudio, string> = {
+  ptbr: '\ud83c\udde7\ud83c\uddf7 Portuguese audio',
+  original: 'Original audio'
+};
+
+/** Offer order. Portuguese first, matching the order the PWA's modal puts its two buttons in. */
+export const REQUEST_AUDIOS: readonly RequestAudio[] = ['ptbr', 'original'];
+
+/** The value arrives as a URL path segment. Anything that is not one of the two is not a
+ *  preference we can honour — reject it rather than quietly filing the request as 'original',
+ *  which would hand someone the wrong audio and no way to tell. */
+export function parseRequestAudio(raw: string): RequestAudio | null {
+  return raw === 'ptbr' || raw === 'original' ? raw : null;
+}
+
 export function buildRequestStream(
-  origin: string, token: string, type: string, id: string
+  origin: string, token: string, type: string, id: string, audio: RequestAudio
 ): Record<string, unknown> {
   return {
-    url: `${origin}/api/_public/addon/${token}/request/${type}/${id}`,
+    url: `${origin}/api/_public/addon/${token}/request/${type}/${id}/${audio}`,
     name: 'Pulse',
-    description: '\uff0b Request on Pulse\nNot in your library — select to request it',
+    description: `\uff0b Request on Pulse\n${AUDIO_LABEL[audio]}`,
     behaviorHints: { notWebReady: true }
   };
 }

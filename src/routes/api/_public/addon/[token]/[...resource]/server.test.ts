@@ -168,8 +168,16 @@ it('returns a request stream for a title NOT in the library', async () => {
   stubJf({ Items: [] });
   const { GET } = await import('./+server');
   const body = await (await (GET as any)(call(t, 'stream/movie/tt0000000.json'))).json();
-  expect(body.streams).toHaveLength(1);
-  expect(body.streams[0].url).toContain(`/addon/${t}/request/movie/tt0000000`);
+  // One row per audio preference: Stremio gives an addon no input widget, so the stream list is
+  // the only place a choice can be offered at all.
+  expect(body.streams).toHaveLength(2);
+  expect(body.streams.map((x: any) => x.url)).toEqual([
+    `http://pulse:3000/api/_public/addon/${t}/request/movie/tt0000000/ptbr`,
+    `http://pulse:3000/api/_public/addon/${t}/request/movie/tt0000000/original`
+  ]);
+  // Each row has to say which one it is, or the viewer is picking blind between two identical
+  // lines.
+  expect(body.streams[0].description).not.toBe(body.streams[1].description);
 });
 
 it('resolves an episode to its own jellyfin id, not the series', async () => {
@@ -436,6 +444,68 @@ it('request creates a request for the token consumer and plays the clip', async 
   expect(rows).toHaveLength(1);
   expect((rows[0] as any).tmdb_id).toBe(278);
   expect((rows[0] as any).media_type).toBe('movie');
+});
+
+it('sends the PT-BR quality profile when the ptbr row is the one selected', async () => {
+  const t = mintAddonToken(db, { consumerId, label: 'TV' });
+  withSeerr();
+  let posted: any = null;
+  stubUpstream((u, init) => {
+    if (u.includes('cinemeta')) return cinemeta();
+    // Profile discovery: the default radarr, then its profiles. `resolveAudioProfile` matches the
+    // profile whose NAME looks PT-BR — id 8 here, mirroring the live radarr.
+    if (/\/api\/v1\/service\/radarr\/0$/.test(u)) return new Response(JSON.stringify({
+      profiles: [{ id: 7, name: 'Standard 1080p' }, { id: 8, name: 'Standard 1080p (PT-BR)' }]
+    }), { status: 200 });
+    if (/\/api\/v1\/service\/radarr$/.test(u)) return new Response(
+      JSON.stringify([{ id: 0, name: 'Radarr', isDefault: true }]), { status: 200 });
+    if (u.includes('/api/v1/request')) {
+      posted = JSON.parse(String((init as any)?.body ?? '{}'));
+      return new Response(JSON.stringify({ id: 1 }), { status: 200 });
+    }
+    return new Response(JSON.stringify({ title: 'Shawshank' }), { status: 200 });
+  });
+  const { GET } = await import('./+server');
+  expect((await (GET as any)(call(t, 'request/movie/tt0111161/ptbr'))).status).toBe(302);
+  expect(posted).toMatchObject({ mediaId: 278, profileId: 8, serverId: 0 });
+});
+
+it('sends no profile for the original row, leaving seerr its default', async () => {
+  const t = mintAddonToken(db, { consumerId, label: 'TV' });
+  withSeerr();
+  let posted: any = null;
+  stubUpstream((u, init) => {
+    if (u.includes('cinemeta')) return cinemeta();
+    if (u.includes('/api/v1/request')) {
+      posted = JSON.parse(String((init as any)?.body ?? '{}'));
+      return new Response(JSON.stringify({ id: 1 }), { status: 200 });
+    }
+    return new Response(JSON.stringify({ title: 'Shawshank' }), { status: 200 });
+  });
+  const { GET } = await import('./+server');
+  expect((await (GET as any)(call(t, 'request/movie/tt0111161/original'))).status).toBe(302);
+  expect(posted).not.toBeNull();
+  expect(posted.profileId).toBeUndefined();
+});
+
+it('404s an audio segment that is neither preference rather than guessing one', async () => {
+  const t = mintAddonToken(db, { consumerId, label: 'TV' });
+  withSeerr();
+  let posts = 0;
+  stubUpstream((u) => {
+    if (u.includes('cinemeta')) return cinemeta();
+    if (u.includes('/api/v1/request')) { posts++; return new Response(JSON.stringify({ id: 1 }), { status: 200 }); }
+    return new Response(JSON.stringify({ title: 'Shawshank' }), { status: 200 });
+  });
+  const { GET } = await import('./+server');
+  // Defaulting an unrecognised value to 'original' would hand someone the wrong audio silently.
+  // Not in this list: a trailing slash. `filter(Boolean)` drops the empty segment, so
+  // `request/movie/tt…/` is the legacy 3-part form and still means seerr's default — which is
+  // exactly what a client that cached the old url should get.
+  for (const bad of ['ptBR', 'pt-br', 'dublado', 'ptbr/extra', 'original.json']) {
+    expect((await (GET as any)(call(t, `request/movie/tt0111161/${bad}`))).status).toBe(404);
+  }
+  expect(posts).toBe(0);
 });
 
 it('CRITICAL: selecting request twice does not stack duplicate requests', async () => {

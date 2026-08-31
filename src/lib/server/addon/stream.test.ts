@@ -1,5 +1,7 @@
 import { it, expect } from 'vitest';
-import { parseStreamId, buildPlayStream, buildRequestStream } from './stream';
+import {
+  parseStreamId, buildPlayStream, buildRequestStream, parseRequestAudio, REQUEST_AUDIOS
+} from './stream';
 
 it('parses a movie id', () => {
   expect(parseStreamId('tt0111161')).toEqual({ imdbId: 'tt0111161', season: null, episode: null });
@@ -58,11 +60,32 @@ it('builds a play stream pointing at pulse, never at jellyfin', () => {
 });
 
 it('builds a request stream that names what it will do', () => {
-  const s = buildRequestStream('http://pulse:3000', 'tok', 'movie', 'tt1') as any;
-  expect(s.url).toBe('http://pulse:3000/api/_public/addon/tok/request/movie/tt1');
+  const s = buildRequestStream('http://pulse:3000', 'tok', 'movie', 'tt1', 'original') as any;
+  expect(s.url).toBe('http://pulse:3000/api/_public/addon/tok/request/movie/tt1/original');
   expect(s.name).toBeTruthy();
   // The viewer's only signal is this text; it must say that selecting it requests the title.
   expect(String(s.description ?? s.title ?? '').toLowerCase()).toContain('request');
-  // Two lines: what selecting it does, then why it is offered at all.
-  expect(s.description).toBe('\uff0b Request on Pulse\nNot in your library — select to request it');
+  // Two lines: what selecting it does, then which audio it will ask for.
+  expect(s.description).toBe('\uff0b Request on Pulse\nOriginal audio');
+});
+
+it('gives each audio preference its own url and its own visible label', () => {
+  const rows = REQUEST_AUDIOS.map(
+    (a) => buildRequestStream('http://pulse:3000', 'tok', 'movie', 'tt1', a) as any
+  );
+  // Same url for both rows would make the choice a lie; same description would make it invisible.
+  expect(new Set(rows.map((r) => r.url)).size).toBe(rows.length);
+  expect(new Set(rows.map((r) => r.description)).size).toBe(rows.length);
+  // The preference has to survive into the url — it is the only thing the request branch reads.
+  for (let i = 0; i < rows.length; i++) expect(rows[i].url).toContain(`/${REQUEST_AUDIOS[i]}`);
+});
+
+it('accepts exactly the two audio preferences and rejects everything else', () => {
+  expect(parseRequestAudio('ptbr')).toBe('ptbr');
+  expect(parseRequestAudio('original')).toBe('original');
+  // A near-miss must not resolve: quietly falling back to 'original' would hand someone the
+  // wrong audio with no way to tell it went wrong.
+  for (const bad of ['', 'PTBR', 'pt-br', 'ptbr ', 'dublado', 'null', '__proto__']) {
+    expect(parseRequestAudio(bad)).toBeNull();
+  }
 });

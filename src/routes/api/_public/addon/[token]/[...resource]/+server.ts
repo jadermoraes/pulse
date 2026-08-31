@@ -17,7 +17,9 @@ import { getDb } from '$lib/server/db';
 import { listConnections, type Connection } from '$lib/server/connections';
 import { resolveAddonToken, touchAddonToken } from '$lib/server/addon/tokens';
 import { buildManifest, parseExtras, toMetaPreviews, CATALOG_IDS } from '$lib/server/addon/catalog';
-import { parseStreamId, buildPlayStream, buildRequestStream } from '$lib/server/addon/stream';
+import {
+  parseStreamId, buildPlayStream, buildRequestStream, parseRequestAudio, REQUEST_AUDIOS
+} from '$lib/server/addon/stream';
 import {
   listLibrary, findByImdb, findEpisode, upstreamStreamUrl, upstreamPosterUrl
 } from '$lib/server/addon/jellyfin-library';
@@ -156,8 +158,11 @@ export const GET: RequestHandler = async ({ params, url, request, getClientAddre
 
     const found = await findByImdb(conn, parsed.imdbId, type);
     if (!found) {
-      // Not in the library at all — offer the request action instead of nothing.
-      return jsonRes({ streams: [buildRequestStream(origin, token, type, rawId)] });
+      // Not in the library at all — offer the request action instead of nothing. One row per
+      // audio preference, because the stream list is the only picker Stremio gives an addon.
+      return jsonRes({
+        streams: REQUEST_AUDIOS.map((a) => buildRequestStream(origin, token, type, rawId, a))
+      });
     }
 
     let playId: string | null = found.jellyfinId;
@@ -233,9 +238,12 @@ export const GET: RequestHandler = async ({ params, url, request, getClientAddre
     });
   }
 
-  // request/<type>/<id>
-  if (parts[0] === 'request' && parts.length === 3) {
+  // request/<type>/<id>/<audio>   (the 3-part form predates the audio choice: a client that
+  // cached the old url keeps working, and means the same thing it did then — seerr's default.)
+  if (parts[0] === 'request' && (parts.length === 3 || parts.length === 4)) {
     const type = stremioType(parts[1]);
+    const audio = parts.length === 4 ? parseRequestAudio(parts[3]) : 'original';
+    if (!audio) return notFound();
     // Decode with the SAME safeDecode the stream branch uses, and validate the DECODED value.
     // The stream branch passes the still-encoded id into `buildRequestStream`, so what arrives
     // here can be percent-escaped — validating the raw form would reject every episode request.
@@ -271,7 +279,7 @@ export const GET: RequestHandler = async ({ params, url, request, getClientAddre
                 AND status IN ('pending','approved','processing','available')`
           ).get(consumer.id, meta.tmdbId, mediaType);
           if (!existing) {
-            await createConsumerRequest(db, consumer, { tmdbId: meta.tmdbId, mediaType });
+            await createConsumerRequest(db, consumer, { tmdbId: meta.tmdbId, mediaType, audio });
             logAccess(db, {
               consumerId: consumer.id, type: 'request', detail: `${meta.name} (stremio addon)`,
               ip: ip ?? undefined
