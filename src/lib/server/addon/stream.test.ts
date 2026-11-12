@@ -73,19 +73,20 @@ it('gives each audio preference its own url and its own visible label', () => {
   const rows = REQUEST_AUDIOS.map(
     (a) => buildRequestStream('http://pulse:3000', 'tok', 'movie', 'tt1', a) as any
   );
-  // Same url for both rows would make the choice a lie; same description would make it invisible.
+  // Same url for two rows would make the choice a lie; same description would make it invisible.
   expect(new Set(rows.map((r) => r.url)).size).toBe(rows.length);
   expect(new Set(rows.map((r) => r.description)).size).toBe(rows.length);
   // The preference has to survive into the url — it is the only thing the request branch reads.
   for (let i = 0; i < rows.length; i++) expect(rows[i].url).toContain(`/${REQUEST_AUDIOS[i]}`);
 });
 
-it('accepts exactly the two audio preferences and rejects everything else', () => {
+it('accepts exactly the known audio preferences and rejects everything else', () => {
   expect(parseRequestAudio('ptbr')).toBe('ptbr');
+  expect(parseRequestAudio('4k')).toBe('4k');
   expect(parseRequestAudio('original')).toBe('original');
   // A near-miss must not resolve: quietly falling back to 'original' would hand someone the
   // wrong audio with no way to tell it went wrong.
-  for (const bad of ['', 'PTBR', 'pt-br', 'ptbr ', 'dublado', 'null', '__proto__']) {
+  for (const bad of ['', '4K', 'uhd', 'PTBR', 'pt-br', 'ptbr ', 'dublado', 'null', '__proto__']) {
     expect(parseRequestAudio(bad)).toBeNull();
   }
 });

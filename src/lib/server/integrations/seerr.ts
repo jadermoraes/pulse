@@ -10,15 +10,21 @@ import { publicBase } from '../public-url';
 /**
  * Resolve the *arr quality profile for a request's audio preference.
  *
- * 'ptbr' → the profile whose name matches PT-BR on the default radarr (movie) / sonarr (tv)
- * server, so the request grabs the Brazilian-Portuguese profile instead of seerr's server
- * default. Anything else → {} (let seerr use its default). Best-effort: any failure returns {},
+ * 'ptbr' → the profile whose name matches PT-BR, '4k' → the one whose name matches Ultra/4K, on
+ * the default radarr (movie) / sonarr (tv) server, so the request grabs that profile instead of
+ * seerr's server default. Anything else → {} (let seerr use its default). Best-effort: any failure returns {},
  * so a request never breaks just because profile discovery hiccupped.
  */
+const PROFILE_MATCH: Record<string, RegExp> = {
+  ptbr: /pt[\s._-]?br/i,
+  '4k': /\b(ultra|4k|2160p?)\b/i
+};
+
 export async function resolveAudioProfile(
   conn: Connection, mediaType: 'movie' | 'tv', audio: string | undefined
 ): Promise<{ profileId?: number; serverId?: number }> {
-  if (audio !== 'ptbr') return {};
+  const match = PROFILE_MATCH[audio ?? ''];
+  if (!match) return {};
   const svc = mediaType === 'tv' ? 'sonarr' : 'radarr';
   try {
     const servers = await getJsonWithKey(joinUrl(conn.baseUrl, `/api/v1/service/${svc}`), conn.secret);
@@ -27,8 +33,8 @@ export async function resolveAudioProfile(
     if (!server) return {};
     const detail = await getJsonWithKey(joinUrl(conn.baseUrl, `/api/v1/service/${svc}/${server.id}`), conn.secret);
     const profiles: Array<{ id: number; name: string }> = Array.isArray(detail?.profiles) ? detail.profiles : [];
-    const ptbr = profiles.find((p) => /pt[\s._-]?br/i.test(String(p.name)));
-    return ptbr ? { profileId: Number(ptbr.id), serverId: Number(server.id) } : {};
+    const hit = profiles.find((p) => match.test(String(p.name)));
+    return hit ? { profileId: Number(hit.id), serverId: Number(server.id) } : {};
   } catch {
     return {};
   }

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { seerr, computeSeerrStatus } from './seerr';
+import { seerr, computeSeerrStatus, resolveAudioProfile } from './seerr';
 import type { Connection } from '../connections';
 
 const conn: Connection = { id: 1, type: 'seerr', name: 'Seerr',
@@ -555,5 +555,36 @@ describe('seerr detail', () => {
     });
     const d = await seerr.detail!(conn, { id: 6, tmdbId: 900, mediaType: 'movie' });
     expect(JSON.stringify(d)).not.toContain('API-KEY');
+  });
+});
+
+describe('resolveAudioProfile', () => {
+  const profiles = [
+    { id: 7, name: 'Standard 1080p' },
+    { id: 8, name: 'Standard 1080p (PT-BR)' },
+    { id: 9, name: 'Ultra 4K (Original)' }
+  ];
+  const arr = (svc: string) => ({
+    [`/api/v1/service/${svc}`]: [{ id: 0, isDefault: true }],
+    [`/api/v1/service/${svc}/0`]: { profiles }
+  });
+
+  it('maps each preference to its profile on the default server', async () => {
+    mockFetch({ ...arr('radarr'), ...arr('sonarr') });
+    expect(await resolveAudioProfile(conn, 'movie', 'ptbr')).toEqual({ profileId: 8, serverId: 0 });
+    expect(await resolveAudioProfile(conn, 'movie', '4k')).toEqual({ profileId: 9, serverId: 0 });
+    expect(await resolveAudioProfile(conn, 'tv', '4k')).toEqual({ profileId: 9, serverId: 0 });
+  });
+
+  it('leaves original / unknown preferences to seerr\'s default', async () => {
+    mockFetch(arr('radarr'));
+    expect(await resolveAudioProfile(conn, 'movie', 'original')).toEqual({});
+    expect(await resolveAudioProfile(conn, 'movie', undefined)).toEqual({});
+    expect(await resolveAudioProfile(conn, 'movie', 'toString')).toEqual({});
+  });
+
+  it('returns {} when no profile matches, so the request still goes through', async () => {
+    mockFetch({ '/api/v1/service/radarr': [{ id: 0, isDefault: true }], '/api/v1/service/radarr/0': { profiles: profiles.slice(0, 1) } });
+    expect(await resolveAudioProfile(conn, 'movie', '4k')).toEqual({});
   });
 });

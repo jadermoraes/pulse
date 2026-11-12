@@ -170,14 +170,14 @@ it('returns a request stream for a title NOT in the library', async () => {
   const body = await (await (GET as any)(call(t, 'stream/movie/tt0000000.json'))).json();
   // One row per audio preference: Stremio gives an addon no input widget, so the stream list is
   // the only place a choice can be offered at all.
-  expect(body.streams).toHaveLength(2);
+  expect(body.streams).toHaveLength(3);
   expect(body.streams.map((x: any) => x.url)).toEqual([
     `http://pulse:3000/api/_public/addon/${t}/request/movie/tt0000000/ptbr`,
-    `http://pulse:3000/api/_public/addon/${t}/request/movie/tt0000000/original`
+    `http://pulse:3000/api/_public/addon/${t}/request/movie/tt0000000/original`,
+    `http://pulse:3000/api/_public/addon/${t}/request/movie/tt0000000/4k`
   ]);
-  // Each row has to say which one it is, or the viewer is picking blind between two identical
-  // lines.
-  expect(body.streams[0].description).not.toBe(body.streams[1].description);
+  // Each row has to say which one it is, or the viewer is picking blind between identical lines.
+  expect(new Set(body.streams.map((x: any) => x.description)).size).toBe(3);
 });
 
 it('resolves an episode to its own jellyfin id, not the series', async () => {

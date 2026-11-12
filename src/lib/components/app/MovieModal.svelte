@@ -17,9 +17,9 @@
   let busy = $state(false);
   let done = $state(false);
   let reqError = $state(false);
-  // Audio preference for the request: 'original' (seerr's default profile) or 'ptbr' (the
-  // Brazilian-Portuguese quality profile). Only meaningful for movies/series not yet on the server.
-  let audio = $state<'original' | 'ptbr'>('original');
+  // Profile for the request: 'original' (seerr's default profile), 'ptbr' (the Brazilian-Portuguese
+  // profile) or '4k' (the Ultra 4K original-audio profile). Only meaningful for titles not yet on the server.
+  let audio = $state<'original' | 'ptbr' | '4k'>('original');
 
   // Report-a-problem composer state.
   let reportOpen = $state(false);
@@ -230,6 +230,13 @@
               onclick={() => (audio = 'original')}
               disabled={busy}
             >{$_('app.audioOriginal')}</button>
+            <button
+              type="button"
+              class="audio-opt"
+              class:sel={audio === '4k'}
+              onclick={() => (audio = '4k')}
+              disabled={busy}
+            >{$_('app.audio4k')}</button>
           </div>
           <button class="act act-request" onclick={request} disabled={busy}>
             {busy ? $_('app.loading') : $_('app.request')}

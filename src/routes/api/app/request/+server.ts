@@ -12,7 +12,7 @@ export const POST: RequestHandler = async ({ request, locals, getClientAddress }
   try { body = await request.json(); } catch { throw error(400, 'Invalid JSON body'); }
   const tmdbId = Number(body.tmdbId);
   const mediaType = body.mediaType === 'tv' ? 'tv' : 'movie';
-  const audio = body.audio === 'ptbr' ? 'ptbr' : 'original';
+  const audio = body.audio === 'ptbr' || body.audio === '4k' ? body.audio : 'original';
   if (!Number.isFinite(tmdbId) || tmdbId <= 0) throw error(400, 'tmdbId required');
   const consumer = getConsumer(db, locals.consumer.id);
   if (!consumer) throw error(401, 'Unauthorized');

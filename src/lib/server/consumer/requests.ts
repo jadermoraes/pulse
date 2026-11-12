@@ -33,7 +33,7 @@ export function mapSeerrLabel(label: string): ConsumerRequestStatus {
 
 export async function createConsumerRequest(
   db: DB, consumer: Pick<ConsumerUser, 'id' | 'seerrUserId'>,
-  m: { tmdbId: number; mediaType: 'movie' | 'tv'; audio?: 'ptbr' | 'original' }
+  m: { tmdbId: number; mediaType: 'movie' | 'tv'; audio?: 'ptbr' | 'original' | '4k' }
 ): Promise<ConsumerRequest> {
   const seerr = seerrConn(db);
   if (!seerr) throw new Error('No seerr connection configured');

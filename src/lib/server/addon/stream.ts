@@ -33,26 +33,27 @@ export function buildPlayStream(
   };
 }
 
-/** The audio preference a request carries. The same two values the PWA's movie modal offers, so
+/** The audio/quality preference a request carries. The same values the PWA's movie modal offers, so
  *  a title requested from the TV and one requested from the phone mean the same thing. */
-export type RequestAudio = 'ptbr' | 'original';
+export type RequestAudio = 'ptbr' | 'original' | '4k';
 
 /** Stremio has no input widget of any kind — the stream list IS the picker, so every choice has
- *  to be its own selectable row. Two is the whole vocabulary: more rows would bury the actual
- *  play sources under a menu. */
+ *  to be its own selectable row. Keep the vocabulary tiny: more rows would bury the actual play
+ *  sources under a menu. */
 const AUDIO_LABEL: Record<RequestAudio, string> = {
   ptbr: '\ud83c\udde7\ud83c\uddf7 Portuguese audio',
-  original: 'Original audio'
+  original: 'Original audio',
+  '4k': '4K \u00b7 Original audio'
 };
 
-/** Offer order. Portuguese first, matching the order the PWA's modal puts its two buttons in. */
-export const REQUEST_AUDIOS: readonly RequestAudio[] = ['ptbr', 'original'];
+/** Offer order, matching the order the PWA's modal puts its buttons in. */
+export const REQUEST_AUDIOS: readonly RequestAudio[] = ['ptbr', 'original', '4k'];
 
-/** The value arrives as a URL path segment. Anything that is not one of the two is not a
+/** The value arrives as a URL path segment. Anything that is not one of REQUEST_AUDIOS is not a
  *  preference we can honour — reject it rather than quietly filing the request as 'original',
  *  which would hand someone the wrong audio and no way to tell. */
 export function parseRequestAudio(raw: string): RequestAudio | null {
-  return raw === 'ptbr' || raw === 'original' ? raw : null;
+  return (REQUEST_AUDIOS as readonly string[]).includes(raw) ? (raw as RequestAudio) : null;
 }
 
 export function buildRequestStream(
