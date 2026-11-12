@@ -560,6 +560,7 @@ describe('seerr detail', () => {
 
 describe('resolveAudioProfile', () => {
   const profiles = [
+    { id: 5, name: 'Ultra-HD' },
     { id: 7, name: 'Standard 1080p' },
     { id: 8, name: 'Standard 1080p (PT-BR)' },
     { id: 9, name: 'Ultra 4K (Original)' }

@@ -10,14 +10,15 @@ import { publicBase } from '../public-url';
 /**
  * Resolve the *arr quality profile for a request's audio preference.
  *
- * 'ptbr' → the profile whose name matches PT-BR, '4k' → the one whose name matches Ultra/4K, on
+ * 'ptbr' → the profile whose name matches PT-BR, '4k' → the one whose name says 4K, on
  * the default radarr (movie) / sonarr (tv) server, so the request grabs that profile instead of
  * seerr's server default. Anything else → {} (let seerr use its default). Best-effort: any failure returns {},
  * so a request never breaks just because profile discovery hiccupped.
  */
 const PROFILE_MATCH: Record<string, RegExp> = {
   ptbr: /pt[\s._-]?br/i,
-  '4k': /\b(ultra|4k|2160p?)\b/i
+  // Only '4K' — the stock 'Ultra-HD' profile also says 'ultra' and sorts first.
+  '4k': /\b4k\b/i
 };
 
 export async function resolveAudioProfile(
